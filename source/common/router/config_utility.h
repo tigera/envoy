@@ -9,12 +9,12 @@
 #include "envoy/http/codes.h"
 #include "envoy/upstream/resource_manager.h"
 
-#include "common/common/empty_string.h"
-#include "common/common/matchers.h"
-#include "common/common/utility.h"
-#include "common/http/headers.h"
-#include "common/http/utility.h"
-#include "common/protobuf/utility.h"
+#include "source/common/common/empty_string.h"
+#include "source/common/common/matchers.h"
+#include "source/common/common/utility.h"
+#include "source/common/http/headers.h"
+#include "source/common/http/utility.h"
+#include "source/common/protobuf/utility.h"
 
 #include "absl/types/optional.h"
 
@@ -39,11 +39,12 @@ public:
      * @param request_query_params supplies the parsed query parameters from a request.
      * @return bool true if a match for this QueryParameterMatcher exists in request_query_params.
      */
-    bool matches(const Http::Utility::QueryParams& request_query_params) const;
+    bool matches(const Http::Utility::QueryParamsMulti& request_query_params) const;
 
   private:
     const std::string name_;
-    const absl::optional<Matchers::StringMatcherImpl> matcher_;
+    const absl::optional<Matchers::StringMatcherImpl<envoy::type::matcher::v3::StringMatcher>>
+        matcher_;
   };
 
   using QueryParameterMatcherPtr = std::unique_ptr<const QueryParameterMatcher>;
@@ -61,7 +62,7 @@ public:
    * @return bool true if all the query params (and values) in the config_params are found in the
    *         query_params
    */
-  static bool matchQueryParams(const Http::Utility::QueryParams& query_params,
+  static bool matchQueryParams(const Http::Utility::QueryParamsMulti& query_params,
                                const std::vector<QueryParameterMatcherPtr>& config_query_params);
 
   /**
@@ -83,17 +84,18 @@ public:
   parseDirectResponseCode(const envoy::config::route::v3::Route& route);
 
   /**
-   * Returns the content of the response body to send with direct responses from a route.
+   * Returns the content of the response body to send with direct responses from a route or an
+   * error.
    * @param route supplies the Route configuration.
    * @param api reference to the Api object
    * @param max_body_size_bytes supplies the maximum response body size in bytes.
    * @return absl::optional<std::string> the response body provided inline in the route's
    *         direct_response if specified, or the contents of the file named in the
    *         route's direct_response if specified, or an empty string otherwise.
-   * @throw EnvoyException if the route configuration contains an error.
    */
-  static std::string parseDirectResponseBody(const envoy::config::route::v3::Route& route,
-                                             Api::Api& api, uint32_t max_body_size_bytes);
+  static absl::StatusOr<std::string>
+  parseDirectResponseBody(const envoy::config::route::v3::Route& route, Api::Api& api,
+                          uint32_t max_body_size_bytes);
 
   /**
    * Returns the HTTP Status Code enum parsed from proto.

@@ -23,9 +23,26 @@ envoy_proto_library(
 )
 
 envoy_proto_library(
+    name = "apikeys_proto",
+    srcs = [":apikeys.proto"],
+)
+
+envoy_proto_descriptor(
+    name = "apikeys_proto_descriptor",
+    srcs = [
+        "apikeys.proto",
+    ],
+    out = "apikeys.descriptor",
+    external_deps = [
+        "api_httpbody_protos",
+        "http_api_protos",
+        "well_known_protos",
+    ],
+)
+
+envoy_proto_library(
     name = "bookstore_proto",
     srcs = [":bookstore.proto"],
-    external_deps = ["api_httpbody_protos"],
 )
 
 envoy_proto_descriptor(
@@ -48,7 +65,7 @@ envoy_proto_library(
     name = "sensitive_proto",
     srcs = [":sensitive.proto"],
     deps = [
-        "@com_github_cncf_udpa//udpa/annotations:pkg",
-        "@com_github_cncf_udpa//udpa/type/v1:pkg",
+        "@com_github_cncf_xds//udpa/annotations:pkg",
+        "@com_github_cncf_xds//xds/type/v3:pkg",
     ],
 )

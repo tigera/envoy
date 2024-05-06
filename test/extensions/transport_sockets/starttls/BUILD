@@ -17,7 +17,7 @@ envoy_extension_cc_test(
     srcs = [
         "starttls_socket_test.cc",
     ],
-    extension_name = "envoy.transport_sockets.starttls",
+    extension_names = ["envoy.transport_sockets.starttls"],
     deps = [
         "//source/common/network:transport_socket_options_lib",
         "//source/extensions/transport_sockets/starttls:config",
@@ -33,13 +33,14 @@ envoy_proto_library(
 
 envoy_extension_cc_test(
     name = "starttls_integration_test",
+    size = "large",
     srcs = [
         "starttls_integration_test.cc",
     ],
     data = [
         "//test/config/integration/certs",
     ],
-    extension_name = "envoy.transport_sockets.starttls",
+    extension_names = ["envoy.transport_sockets.starttls"],
     deps = [
         ":starttls_integration_proto_cc_proto",
         "//source/extensions/filters/network/tcp_proxy:config",
@@ -53,13 +54,14 @@ envoy_extension_cc_test(
 
 envoy_extension_cc_test(
     name = "upstream_starttls_integration_test",
+    size = "large",
     srcs = [
         "upstream_starttls_integration_test.cc",
     ],
     data = [
         "//test/config/integration/certs",
     ],
-    extension_name = "envoy.transport_sockets.starttls",
+    extension_names = ["envoy.transport_sockets.starttls"],
     deps = [
         ":starttls_integration_proto_cc_proto",
         "//source/extensions/transport_sockets/starttls:config",

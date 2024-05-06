@@ -9,7 +9,7 @@
 #include "source/extensions/common/wasm/ext/envoy_proxy_wasm_api.h"
 #include "source/extensions/common/wasm/ext/declare_property.pb.h"
 #else
-#include "extensions/common/wasm/ext/envoy_null_plugin.h"
+#include "source/extensions/common/wasm/ext/envoy_null_plugin.h"
 #include "absl/base/casts.h"
 #endif
 
@@ -54,14 +54,19 @@ bool TestRootContext::onStart(size_t configuration_size) {
   return true;
 }
 
-bool TestRootContext::onConfigure(size_t) {
+bool TestRootContext::onConfigure(size_t size) {
+  if (size > 0 &&
+      getBufferBytes(WasmBufferType::PluginConfiguration, 0, size)->toString() == "invalid") {
+    return false;
+  }
   if (test_ == "property") {
     {
       // Many properties are not available in the root context.
       const std::vector<std::string> properties = {
           "string_state",     "metadata",   "request",        "response",    "connection",
           "connection_id",    "upstream",   "source",         "destination", "cluster_name",
-          "cluster_metadata", "route_name", "route_metadata",
+          "cluster_metadata", "route_name", "route_metadata", "upstream_host_metadata",
+          "filter_state",
       };
       for (const auto& property : properties) {
         if (getProperty({property}).has_value()) {
@@ -142,7 +147,7 @@ FilterHeadersStatus TestContext::onRequestHeaders(uint32_t, bool) {
     }
   } else if (test == "metadata") {
     std::string value;
-    if (!getValue({"node", "metadata", "wasm_node_get_key"}, &value)) {
+    if (!getValue({"xds", "node", "metadata", "wasm_node_get_key"}, &value)) {
       logDebug("missing node metadata");
     }
     auto r = setFilterStateStringValue("wasm_request_set_key", "wasm_request_set_value");
@@ -175,8 +180,8 @@ FilterHeadersStatus TestContext::onRequestHeaders(uint32_t, bool) {
     {
       // Validate a valid CEL expression
       const std::string expr = R"(
-  envoy.api.v2.core.GrpcService{
-    envoy_grpc: envoy.api.v2.core.GrpcService.EnvoyGrpc {
+  envoy.config.core.v3.GrpcService{
+    envoy_grpc: envoy.config.core.v3.GrpcService.EnvoyGrpc {
       cluster_name: "test"
     }
   })";
@@ -275,7 +280,7 @@ FilterHeadersStatus TestContext::onRequestHeaders(uint32_t, bool) {
 
 FilterTrailersStatus TestContext::onRequestTrailers(uint32_t) {
   auto request_trailer = getRequestTrailer("bogus-trailer");
-  if (request_trailer && request_trailer->view() != "") {
+  if (request_trailer && !request_trailer->view().empty()) {
     logWarn("request bogus-trailer found");
   }
   CHECK_RESULT(replaceRequestTrailer("new-trailer", "value"));
@@ -283,7 +288,7 @@ FilterTrailersStatus TestContext::onRequestTrailers(uint32_t) {
   // Not available yet.
   replaceResponseTrailer("new-trailer", "value");
   auto response_trailer = getResponseTrailer("bogus-trailer");
-  if (response_trailer && response_trailer->view() != "") {
+  if (response_trailer && !response_trailer->view().empty()) {
     logWarn("request bogus-trailer found");
   }
   return FilterTrailersStatus::Continue;
@@ -300,7 +305,7 @@ FilterHeadersStatus TestContext::onResponseHeaders(uint32_t, bool) {
 
 FilterTrailersStatus TestContext::onResponseTrailers(uint32_t) {
   auto value = getResponseTrailer("bogus-trailer");
-  if (value && value->view() != "") {
+  if (value && !value->view().empty()) {
     logWarn("response bogus-trailer found");
   }
   CHECK_RESULT(replaceResponseTrailer("new-trailer", "value"));
@@ -357,12 +362,16 @@ void TestContext::onLog() {
     logWarn("onLog " + std::to_string(id()) + " " + std::string(path->view()) + " " +
             std::string(status->view()));
     auto response_header = getResponseHeader("bogus-header");
-    if (response_header && response_header->view() != "") {
+    if (response_header && !response_header->view().empty()) {
       logWarn("response bogus-header found");
     }
     auto response_trailer = getResponseTrailer("bogus-trailer");
-    if (response_trailer && response_trailer->view() != "") {
+    if (response_trailer && !response_trailer->view().empty()) {
       logWarn("response bogus-trailer found");
+    }
+    auto request_trailer = getRequestTrailer("error-details");
+    if (request_trailer && !request_trailer->view().empty()) {
+      logWarn("request bogus-trailer found");
     }
   } else if (test == "cluster_metadata") {
     std::string cluster_metadata;
@@ -528,7 +537,7 @@ void TestContext::onLog() {
 
       // validate null field
       std::string b;
-      if (!getValue({"protobuf_state", "b"}, &b) || b != "") {
+      if (!getValue({"protobuf_state", "b"}, &b) || !b.empty()) {
         logWarn("null field returned " + b);
       }
 
@@ -609,16 +618,16 @@ void TestContext::onDone() {
 }
 
 void TestRootContext::onTick() {
-  if (test_ == "headers") {
+  if (test_ == "headers") { // NOLINT(clang-analyzer-optin.portability.UnixAPI)
     getContext(stream_context_id_)->setEffectiveContext();
     replaceRequestHeader("server", "envoy-wasm-continue");
     continueRequest();
-    if (getBufferBytes(WasmBufferType::PluginConfiguration, 0, 1)->view() != "") {
+    if (!getBufferBytes(WasmBufferType::PluginConfiguration, 0, 1)->view().empty()) {
       logDebug("unexpectd success of getBufferBytes PluginConfiguration");
     }
-  } else if (test_ == "metadata") {
+  } else if (test_ == "metadata") { // NOLINT(clang-analyzer-optin.portability.UnixAPI)
     std::string value;
-    if (!getValue({"node", "metadata", "wasm_node_get_key"}, &value)) {
+    if (!getValue({"node", "metadata", "wasm_node_get_key"}, &value)) { // NOLINT(clang-analyzer-optin.portability.UnixAPI)
       logDebug("missing node metadata");
     }
     logDebug(std::string("onTick ") + value);

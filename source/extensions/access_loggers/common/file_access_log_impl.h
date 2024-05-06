@@ -1,8 +1,7 @@
 #pragma once
 
-#include "common/formatter/substitution_formatter.h"
-
-#include "extensions/access_loggers/common/access_log_base.h"
+#include "source/common/formatter/substitution_formatter.h"
+#include "source/extensions/access_loggers/common/access_log_base.h"
 
 namespace Envoy {
 namespace Extensions {
@@ -20,9 +19,7 @@ public:
 
 private:
   // Common::ImplBase
-  void emitLog(const Http::RequestHeaderMap& request_headers,
-               const Http::ResponseHeaderMap& response_headers,
-               const Http::ResponseTrailerMap& response_trailers,
+  void emitLog(const Formatter::HttpFormatterContext& context,
                const StreamInfo::StreamInfo& stream_info) override;
 
   AccessLog::AccessLogFileSharedPtr log_file_;

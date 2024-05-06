@@ -1,17 +1,45 @@
 #pragma once
 
-#include "common/quic/envoy_quic_proof_verifier_base.h"
+#include <memory>
 
-#include "extensions/transport_sockets/tls/context_impl.h"
+#include "source/common/quic/envoy_quic_proof_verifier_base.h"
+#include "source/common/quic/quic_ssl_connection_info.h"
+#include "source/extensions/transport_sockets/tls/context_impl.h"
 
 namespace Envoy {
 namespace Quic {
+
+class CertVerifyResult : public quic::ProofVerifyDetails {
+public:
+  explicit CertVerifyResult(bool is_valid) : is_valid_(is_valid) {}
+
+  ProofVerifyDetails* Clone() const override { return new CertVerifyResult(is_valid_); }
+
+  bool isValid() const { return is_valid_; }
+
+private:
+  bool is_valid_{false};
+};
+
+using CertVerifyResultPtr = std::unique_ptr<CertVerifyResult>();
+
+// An interface for the Envoy specific QUIC verify context.
+class EnvoyQuicProofVerifyContext : public quic::ProofVerifyContext {
+public:
+  virtual Event::Dispatcher& dispatcher() const PURE;
+  virtual bool isServer() const PURE;
+  virtual const Network::TransportSocketOptionsConstSharedPtr& transportSocketOptions() const PURE;
+  virtual Extensions::TransportSockets::Tls::CertValidator::ExtraValidationContext
+  extraValidationContext() const PURE;
+};
+
+using EnvoyQuicProofVerifyContextPtr = std::unique_ptr<EnvoyQuicProofVerifyContext>;
 
 // A quic::ProofVerifier implementation which verifies cert chain using SSL
 // client context config.
 class EnvoyQuicProofVerifier : public EnvoyQuicProofVerifierBase {
 public:
-  EnvoyQuicProofVerifier(Envoy::Ssl::ClientContextSharedPtr&& context)
+  explicit EnvoyQuicProofVerifier(Envoy::Ssl::ClientContextSharedPtr&& context)
       : context_(std::move(context)) {
     ASSERT(context_.get());
   }

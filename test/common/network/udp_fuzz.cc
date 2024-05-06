@@ -2,13 +2,13 @@
 
 #include "envoy/config/core/v3/base.pb.h"
 
-#include "common/api/os_sys_calls_impl.h"
-#include "common/network/address_impl.h"
-#include "common/network/socket_option_factory.h"
-#include "common/network/socket_option_impl.h"
-#include "common/network/udp_listener_impl.h"
-#include "common/network/udp_packet_writer_handler_impl.h"
-#include "common/network/utility.h"
+#include "source/common/api/os_sys_calls_impl.h"
+#include "source/common/network/address_impl.h"
+#include "source/common/network/socket_option_factory.h"
+#include "source/common/network/socket_option_impl.h"
+#include "source/common/network/udp_listener_impl.h"
+#include "source/common/network/udp_packet_writer_handler_impl.h"
+#include "source/common/network/utility.h"
 
 #include "test/common/network/udp_listener_impl_test_base.h"
 #include "test/fuzz/fuzz_runner.h"
@@ -19,6 +19,8 @@
 #include "test/test_common/network_utility.h"
 #include "test/test_common/threadsafe_singleton_injector.h"
 #include "test/test_common/utility.h"
+
+using testing::Return;
 
 namespace Envoy {
 namespace {
@@ -61,6 +63,8 @@ public:
     server_socket_ = createServerSocket(true, ip_version_);
     server_socket_->addOptions(Network::SocketOptionFactory::buildIpPacketInfoOptions());
     server_socket_->addOptions(Network::SocketOptionFactory::buildRxQueueOverFlowOptions());
+    EXPECT_TRUE(Network::Socket::applyOptions(server_socket_->options(), *server_socket_,
+                                              envoy::config::core::v3::SocketOption::STATE_BOUND));
 
     // Create packet writer
     udp_packet_writer_ = std::make_unique<Network::UdpDefaultWriter>(server_socket_->ioHandle());
@@ -88,7 +92,7 @@ public:
                                                    dispatcherImpl().timeSource(), config);
 
     Network::Address::Instance* send_to_addr_ = new Network::Address::Ipv4Instance(
-        "127.0.0.1", server_socket_->addressProvider().localAddress()->ip()->port());
+        "127.0.0.1", server_socket_->connectionInfoProvider().localAddress()->ip()->port());
 
     // Now do all of the fuzzing
     static const int MaxPackets = 15;

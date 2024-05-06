@@ -4,10 +4,10 @@
 
 #include "envoy/tracing/trace_driver.h"
 
-#include "common/tracing/common_values.h"
-#include "common/tracing/null_span_impl.h"
-
-#include "extensions/tracers/skywalking/trace_segment_reporter.h"
+#include "source/common/tracing/common_values.h"
+#include "source/common/tracing/null_span_impl.h"
+#include "source/common/tracing/trace_context_impl.h"
+#include "source/extensions/tracers/skywalking/trace_segment_reporter.h"
 
 #include "cpp2sky/tracing_context.h"
 #include "cpp2sky/well_known_names.h"
@@ -20,7 +20,7 @@ namespace SkyWalking {
 using cpp2sky::TracingContextPtr;
 using cpp2sky::TracingSpanPtr;
 
-const Http::LowerCaseString& skywalkingPropagationHeaderKey();
+const Tracing::TraceContextHandler& skywalkingPropagationHeaderKey();
 
 class Tracer {
 public:
@@ -36,19 +36,14 @@ public:
   /*
    * Create a new span based on the segment context and parent span.
    *
-   * @param config The tracing config.
-   * @param start_time Start time of span.
-   * @param operation Operation name of span.
-   * @param segment_context The SkyWalking segment context. The newly created span belongs to this
-   * segment.
-   * @param parent The parent span pointer. If parent is null, then the newly created span is first
-   * span of this segment.
+   * @param name Operation name of span.
+   * @param tracing_context The SkyWalking tracing context. The newly created span belongs to this
+   * context.
    *
    * @return The unique ptr to the newly created span.
    */
-  Tracing::SpanPtr startSpan(const Tracing::Config& config, SystemTime start_time,
-                             const std::string& operation, TracingContextPtr tracing_context,
-                             TracingSpanPtr parent);
+  Tracing::SpanPtr startSpan(absl::string_view name, absl::string_view protocol,
+                             TracingContextPtr tracing_context);
 
 private:
   TraceSegmentReporterPtr reporter_;
@@ -58,16 +53,36 @@ using TracerPtr = std::unique_ptr<Tracer>;
 
 class Span : public Tracing::Span {
 public:
-  Span(TracingSpanPtr span_entity, TracingContextPtr tracing_context, Tracer& parent_tracer)
-      : parent_tracer_(parent_tracer), span_entity_(span_entity),
-        tracing_context_(tracing_context) {}
+  Span(absl::string_view name, absl::string_view protocol, TracingContextPtr tracing_context,
+       Tracer& parent_tracer)
+      : parent_tracer_(parent_tracer), tracing_context_(tracing_context),
+        span_entity_(tracing_context_->createEntrySpan()) {
+    span_entity_->startSpan({name.data(), name.size()});
+    skywalking::v3::SpanLayer layer;
+    if (absl::StrContains(protocol, "HTTP")) {
+      // TraceContext.protocol of http is parsed from http message, which value could be HTTP/1.1,
+      // etc.
+      layer = skywalking::v3::SpanLayer::Http;
+    } else if (!skywalking::v3::SpanLayer_Parse(std::string(protocol), &layer)) {
+      layer = skywalking::v3::SpanLayer::Unknown;
+    }
+    span_entity_->setSpanLayer(layer);
+  }
+  Span(absl::string_view name, skywalking::v3::SpanLayer span_layer, Span& parent_span,
+       TracingContextPtr tracing_context, Tracer& parent_tracer)
+      : parent_tracer_(parent_tracer), tracing_context_(tracing_context),
+        span_entity_(tracing_context_->createExitSpan(parent_span.spanEntity())) {
+    span_entity_->startSpan({name.data(), name.size()});
+    span_entity_->setSpanLayer(span_layer);
+  }
 
   // Tracing::Span
   void setOperation(absl::string_view) override {}
   void setTag(absl::string_view name, absl::string_view value) override;
   void log(SystemTime timestamp, const std::string& event) override;
   void finishSpan() override;
-  void injectContext(Http::RequestHeaderMap& request_headers) override;
+  void injectContext(Tracing::TraceContext& trace_context,
+                     const Upstream::HostDescriptionConstSharedPtr& upstream) override;
   Tracing::SpanPtr spawnChild(const Tracing::Config& config, const std::string& name,
                               SystemTime start_time) override;
   void setSampled(bool do_sample) override;
@@ -80,8 +95,8 @@ public:
 
 private:
   Tracer& parent_tracer_;
-  TracingSpanPtr span_entity_;
   TracingContextPtr tracing_context_;
+  TracingSpanPtr span_entity_;
 };
 
 } // namespace SkyWalking

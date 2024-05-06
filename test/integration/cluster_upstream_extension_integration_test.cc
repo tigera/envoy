@@ -3,7 +3,7 @@
 #include "envoy/registry/registry.h"
 #include "envoy/router/router.h"
 
-#include "common/buffer/buffer_impl.h"
+#include "source/common/buffer/buffer_impl.h"
 
 #include "test/integration/fake_upstream.h"
 #include "test/integration/http_integration.h"
@@ -35,7 +35,8 @@ public:
     config_helper_.addConfigModifier([this](envoy::config::bootstrap::v3::Bootstrap& bootstrap) {
       auto* cluster = bootstrap.mutable_static_resources()->mutable_clusters(0);
       cluster->mutable_upstream_config()->set_name("envoy.filters.connection_pools.http.per_host");
-      cluster->mutable_upstream_config()->mutable_typed_config();
+      cluster->mutable_upstream_config()->mutable_typed_config()->set_type_url(
+          "type.googleapis.com/google.protobuf.Struct");
       populateMetadataTestData(*cluster->mutable_metadata(), "foo", "bar", "cluster-value");
       populateMetadataTestData(*cluster->mutable_load_assignment()
                                     ->mutable_endpoints(0)

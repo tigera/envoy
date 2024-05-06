@@ -3,8 +3,9 @@
 
 #include "envoy/common/platform.h"
 
-#include "common/network/address_impl.h"
-#include "common/quic/quic_io_handle_wrapper.h"
+#include "source/common/network/address_impl.h"
+#include "source/common/network/io_socket_handle_impl.h"
+#include "source/common/quic/quic_io_handle_wrapper.h"
 
 #include "test/mocks/api/mocks.h"
 #include "test/mocks/network/io_handle.h"
@@ -16,19 +17,23 @@
 
 using testing::ByMove;
 using testing::Return;
+using testing::ReturnRef;
 
 namespace Envoy {
 namespace Quic {
 
 class QuicIoHandleWrapperTest : public testing::Test {
 public:
-  QuicIoHandleWrapperTest() : wrapper_(std::make_unique<QuicIoHandleWrapper>(socket_.ioHandle())) {
+  QuicIoHandleWrapperTest() {
+    real_io_handle_ = std::make_unique<Network::IoSocketHandleImpl>();
+    ON_CALL(socket_, ioHandle()).WillByDefault(ReturnRef(*real_io_handle_));
+    wrapper_ = std::make_unique<QuicIoHandleWrapper>(socket_.ioHandle());
     EXPECT_TRUE(wrapper_->isOpen());
     EXPECT_FALSE(socket_.ioHandle().isOpen());
   }
-  ~QuicIoHandleWrapperTest() override = default;
 
 protected:
+  Network::IoHandlePtr real_io_handle_;
   testing::NiceMock<Network::MockListenSocket> socket_;
   std::unique_ptr<QuicIoHandleWrapper> wrapper_;
   testing::StrictMock<Envoy::Api::MockOsSysCalls> os_sys_calls_;
@@ -45,10 +50,10 @@ TEST_F(QuicIoHandleWrapperTest, DelegateIoHandleCalls) {
   os_fd_t fd = socket_.ioHandle().fdDoNotUse();
   char data[5];
   Buffer::RawSlice slice{data, 5};
-  EXPECT_CALL(os_sys_calls_, readv(fd, _, 1)).WillOnce(Return(Api::SysCallSizeResult{5u, 0}));
+  EXPECT_CALL(os_sys_calls_, recv(fd, _, 5, 0)).WillOnce(Return(Api::SysCallSizeResult{5u, 0}));
   wrapper_->readv(5, &slice, 1);
 
-  EXPECT_CALL(os_sys_calls_, writev(fd, _, 1)).WillOnce(Return(Api::SysCallSizeResult{5u, 0}));
+  EXPECT_CALL(os_sys_calls_, send(fd, _, 5, 0)).WillOnce(Return(Api::SysCallSizeResult{5u, 0}));
   wrapper_->writev(&slice, 1);
 
   EXPECT_CALL(os_sys_calls_, socket(AF_INET6, SOCK_STREAM, 0))

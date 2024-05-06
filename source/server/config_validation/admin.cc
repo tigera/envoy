@@ -1,10 +1,16 @@
-#include "server/config_validation/admin.h"
+#include "source/server/config_validation/admin.h"
 
 namespace Envoy {
 namespace Server {
 
 // Pretend that handler was added successfully.
-bool ValidationAdmin::addHandler(const std::string&, const std::string&, HandlerCb, bool, bool) {
+bool ValidationAdmin::addStreamingHandler(const std::string&, const std::string&, GenRequestFn,
+                                          bool, bool, const ParamDescriptorVec&) {
+  return true;
+}
+
+bool ValidationAdmin::addHandler(const std::string&, const std::string&, HandlerCb, bool, bool,
+                                 const ParamDescriptorVec&) {
   return true;
 }
 
@@ -14,22 +20,16 @@ const Network::Socket& ValidationAdmin::socket() { return *socket_; }
 
 ConfigTracker& ValidationAdmin::getConfigTracker() { return config_tracker_; }
 
-void ValidationAdmin::startHttpListener(const std::list<AccessLog::InstanceSharedPtr>&,
-                                        const std::string&,
+void ValidationAdmin::startHttpListener(std::list<AccessLog::InstanceSharedPtr>,
                                         Network::Address::InstanceConstSharedPtr,
-                                        const Network::Socket::OptionsSharedPtr&,
-                                        Stats::ScopePtr&&) {
-  NOT_IMPLEMENTED_GCOVR_EXCL_LINE;
-}
+                                        Network::Socket::OptionsSharedPtr) {}
 
 Http::Code ValidationAdmin::request(absl::string_view, absl::string_view, Http::ResponseHeaderMap&,
                                     std::string&) {
-  NOT_IMPLEMENTED_GCOVR_EXCL_LINE;
+  PANIC("not implemented");
 }
 
-void ValidationAdmin::addListenerToHandler(Network::ConnectionHandler*) {
-  NOT_IMPLEMENTED_GCOVR_EXCL_LINE;
-}
+void ValidationAdmin::addListenerToHandler(Network::ConnectionHandler*) {}
 
 } // namespace Server
 } // namespace Envoy

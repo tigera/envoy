@@ -5,9 +5,8 @@
 #include "envoy/thread_local/thread_local.h"
 #include "envoy/tracing/trace_driver.h"
 
+#include "source/extensions/tracers/skywalking/tracer.h"
 #include "source/tracing_context_impl.h"
-
-#include "extensions/tracers/skywalking/tracer.h"
 
 #include "cpp2sky/exception.h"
 
@@ -25,9 +24,11 @@ public:
   explicit Driver(const envoy::config::trace::v3::SkyWalkingConfig& config,
                   Server::Configuration::TracerFactoryContext& context);
 
-  Tracing::SpanPtr startSpan(const Tracing::Config& config, Http::RequestHeaderMap& request_headers,
-                             const std::string& operation, Envoy::SystemTime start_time,
-                             const Tracing::Decision decision) override;
+  // Tracing::Driver
+  Tracing::SpanPtr startSpan(const Tracing::Config& config, Tracing::TraceContext& trace_context,
+                             const StreamInfo::StreamInfo& stream_info,
+                             const std::string& operation_name,
+                             Tracing::Decision tracing_decision) override;
 
 private:
   void loadConfig(const envoy::config::trace::v3::ClientConfig& client_config,
@@ -44,7 +45,7 @@ private:
   };
 
   TracerConfig config_;
-  SkyWalkingTracerStats tracing_stats_;
+  SkyWalkingTracerStatsSharedPtr tracing_stats_;
   ThreadLocal::SlotPtr tls_slot_ptr_;
   std::unique_ptr<TracingContextFactory> tracing_context_factory_;
 };

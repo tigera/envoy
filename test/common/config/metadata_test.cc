@@ -1,9 +1,9 @@
 #include "envoy/common/exception.h"
 #include "envoy/config/core/v3/base.pb.h"
 
-#include "common/config/metadata.h"
-#include "common/config/well_known_names.h"
-#include "common/protobuf/utility.h"
+#include "source/common/config/metadata.h"
+#include "source/common/config/well_known_names.h"
+#include "source/common/protobuf/utility.h"
 
 #include "test/test_common/registry.h"
 #include "test/test_common/utility.h"
@@ -75,7 +75,7 @@ public:
 
     std::unique_ptr<const TypedMetadata::Object> parse(const ProtobufWkt::Any& d) const override {
       if (!(d.type_url().empty())) {
-        return std::make_unique<Foo>(d.value());
+        return std::make_unique<Foo>(std::string(d.value()));
       }
       throw EnvoyException("Cannot create a Foo when Any metadata is empty.");
     }

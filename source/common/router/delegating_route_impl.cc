@@ -1,4 +1,4 @@
-#include "common/router/delegating_route_impl.h"
+#include "source/common/router/delegating_route_impl.h"
 
 namespace Envoy {
 namespace Router {
@@ -13,10 +13,6 @@ const RouteEntry* DelegatingRoute::routeEntry() const { return base_route_->rout
 const Decorator* DelegatingRoute::decorator() const { return base_route_->decorator(); }
 
 const RouteTracing* DelegatingRoute::tracingConfig() const { return base_route_->tracingConfig(); }
-
-const RouteSpecificFilterConfig* DelegatingRoute::perFilterConfig(const std::string& name) const {
-  return base_route_->perFilterConfig(name);
-}
 
 // Router:DelegatingRouteEntry
 void DelegatingRouteEntry::finalizeResponseHeaders(
@@ -54,6 +50,12 @@ void DelegatingRouteEntry::finalizeRequestHeaders(Http::RequestHeaderMap& header
                                                            insert_envoy_original_path);
 }
 
+Http::HeaderTransforms
+DelegatingRouteEntry::requestHeaderTransforms(const StreamInfo::StreamInfo& stream_info,
+                                              bool do_formatting) const {
+  return base_route_->routeEntry()->requestHeaderTransforms(stream_info, do_formatting);
+}
+
 const Http::HashPolicy* DelegatingRouteEntry::hashPolicy() const {
   return base_route_->routeEntry()->hashPolicy();
 }
@@ -72,6 +74,14 @@ const RateLimitPolicy& DelegatingRouteEntry::rateLimitPolicy() const {
 
 const RetryPolicy& DelegatingRouteEntry::retryPolicy() const {
   return base_route_->routeEntry()->retryPolicy();
+}
+
+const PathMatcherSharedPtr& DelegatingRouteEntry::pathMatcher() const {
+  return base_route_->routeEntry()->pathMatcher();
+}
+
+const PathRewriterSharedPtr& DelegatingRouteEntry::pathRewriter() const {
+  return base_route_->routeEntry()->pathRewriter();
 }
 
 const InternalRedirectPolicy& DelegatingRouteEntry::internalRedirectPolicy() const {
@@ -130,6 +140,8 @@ bool DelegatingRouteEntry::autoHostRewrite() const {
   return base_route_->routeEntry()->autoHostRewrite();
 }
 
+bool DelegatingRouteEntry::appendXfh() const { return base_route_->routeEntry()->appendXfh(); }
+
 const MetadataMatchCriteria* DelegatingRouteEntry::metadataMatchCriteria() const {
   return base_route_->routeEntry()->metadataMatchCriteria();
 }
@@ -142,25 +154,12 @@ bool DelegatingRouteEntry::includeVirtualHostRateLimits() const {
   return base_route_->routeEntry()->includeVirtualHostRateLimits();
 }
 
-const Envoy::Config::TypedMetadata& DelegatingRouteEntry::typedMetadata() const {
-  return base_route_->routeEntry()->typedMetadata();
-}
-
-const envoy::config::core::v3::Metadata& DelegatingRouteEntry::metadata() const {
-  return base_route_->routeEntry()->metadata();
-}
-
 const TlsContextMatchCriteria* DelegatingRouteEntry::tlsContextMatchCriteria() const {
   return base_route_->routeEntry()->tlsContextMatchCriteria();
 }
 
 const PathMatchCriterion& DelegatingRouteEntry::pathMatchCriterion() const {
   return base_route_->routeEntry()->pathMatchCriterion();
-}
-
-const RouteSpecificFilterConfig*
-DelegatingRouteEntry::perFilterConfig(const std::string& name) const {
-  return base_route_->routeEntry()->perFilterConfig(name);
 }
 
 bool DelegatingRouteEntry::includeAttemptCountInRequest() const {
@@ -177,12 +176,17 @@ const UpgradeMap& DelegatingRouteEntry::upgradeMap() const {
 }
 
 using ConnectConfig = envoy::config::route::v3::RouteAction::UpgradeConfig::ConnectConfig;
-const absl::optional<ConnectConfig>& DelegatingRouteEntry::connectConfig() const {
+using ConnectConfigOptRef = OptRef<ConnectConfig>;
+const ConnectConfigOptRef DelegatingRouteEntry::connectConfig() const {
   return base_route_->routeEntry()->connectConfig();
 }
 
-const std::string& DelegatingRouteEntry::routeName() const {
-  return base_route_->routeEntry()->routeName();
+const EarlyDataPolicy& DelegatingRouteEntry::earlyDataPolicy() const {
+  return base_route_->routeEntry()->earlyDataPolicy();
+}
+
+const RouteStatsContextOptRef DelegatingRouteEntry::routeStatsContext() const {
+  return base_route_->routeEntry()->routeStatsContext();
 }
 
 } // namespace Router

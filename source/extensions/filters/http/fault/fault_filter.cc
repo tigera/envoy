@@ -1,4 +1,4 @@
-#include "extensions/filters/http/fault/fault_filter.h"
+#include "source/extensions/filters/http/fault/fault_filter.h"
 
 #include <chrono>
 #include <cstdint>
@@ -12,17 +12,15 @@
 #include "envoy/http/header_map.h"
 #include "envoy/stats/scope.h"
 
-#include "common/common/assert.h"
-#include "common/common/empty_string.h"
-#include "common/common/fmt.h"
-#include "common/http/codes.h"
-#include "common/http/header_map_impl.h"
-#include "common/http/headers.h"
-#include "common/http/utility.h"
-#include "common/protobuf/utility.h"
-#include "common/stats/utility.h"
-
-#include "extensions/filters/http/well_known_names.h"
+#include "source/common/common/assert.h"
+#include "source/common/common/empty_string.h"
+#include "source/common/common/fmt.h"
+#include "source/common/http/codes.h"
+#include "source/common/http/header_map_impl.h"
+#include "source/common/http/headers.h"
+#include "source/common/http/utility.h"
+#include "source/common/protobuf/utility.h"
+#include "source/common/stats/utility.h"
 
 namespace Envoy {
 namespace Extensions {
@@ -52,7 +50,8 @@ FaultSettings::FaultSettings(const envoy::extensions::filters::http::fault::v3::
       response_rate_limit_percent_runtime_(
           PROTOBUF_GET_STRING_OR_DEFAULT(fault, response_rate_limit_percent_runtime,
                                          RuntimeKeys::get().ResponseRateLimitPercentKey)),
-      disable_downstream_cluster_stats_(fault.disable_downstream_cluster_stats()) {
+      disable_downstream_cluster_stats_(fault.disable_downstream_cluster_stats()),
+      filter_metadata_(fault.filter_metadata()) {
   if (fault.has_abort()) {
     request_abort_config_ =
         std::make_unique<Filters::Common::Fault::FaultAbortConfig>(fault.abort());
@@ -113,14 +112,9 @@ Http::FilterHeadersStatus FaultFilter::decodeHeaders(Http::RequestHeaderMap& hea
   // faults. In other words, runtime is supported only when faults are
   // configured at the filter level.
   fault_settings_ = config_->settings();
-  if (decoder_callbacks_->route() && decoder_callbacks_->route()->routeEntry()) {
-    const std::string& name = Extensions::HttpFilters::HttpFilterNames::get().Fault;
-    const auto* route_entry = decoder_callbacks_->route()->routeEntry();
-
-    const auto* per_route_settings =
-        route_entry->mostSpecificPerFilterConfigTyped<FaultSettings>(name);
-    fault_settings_ = per_route_settings ? per_route_settings : fault_settings_;
-  }
+  const auto* per_route_settings =
+      Http::Utility::resolveMostSpecificPerFilterConfig<FaultSettings>(decoder_callbacks_);
+  fault_settings_ = per_route_settings ? per_route_settings : fault_settings_;
 
   if (!matchesTargetUpstreamCluster()) {
     return Http::FilterHeadersStatus::Continue;
@@ -176,6 +170,9 @@ bool FaultFilter::maybeSetupDelay(const Http::RequestHeaderMap& request_headers)
     delay_timer_->enableTimer(duration.value(), &decoder_callbacks_->scope());
     recordDelaysInjectedStats();
     decoder_callbacks_->streamInfo().setResponseFlag(StreamInfo::ResponseFlag::DelayInjected);
+    auto& dynamic_metadata = decoder_callbacks_->streamInfo().dynamicMetadata();
+    (*dynamic_metadata.mutable_filter_metadata())[decoder_callbacks_->filterConfigName()] =
+        fault_settings_->filterMetadata();
     return true;
   }
   return false;
@@ -219,7 +216,7 @@ void FaultFilter::maybeSetupResponseRateLimit(const Http::RequestHeaderMap& requ
         encoder_callbacks_->injectEncodedDataToFilterChain(data, end_stream);
       },
       [this] { encoder_callbacks_->continueEncoding(); },
-      [](uint64_t) {
+      [](uint64_t, bool, std::chrono::milliseconds) {
         // write stats callback.
       },
       config_->timeSource(), decoder_callbacks_->dispatcher(), decoder_callbacks_->scope());
@@ -474,6 +471,9 @@ void FaultFilter::abortWithStatus(Http::Code http_status_code,
                                   absl::optional<Grpc::Status::GrpcStatus> grpc_status) {
   recordAbortsInjectedStats();
   decoder_callbacks_->streamInfo().setResponseFlag(StreamInfo::ResponseFlag::FaultInjected);
+  auto& dynamic_metadata = decoder_callbacks_->streamInfo().dynamicMetadata();
+  (*dynamic_metadata.mutable_filter_metadata())[decoder_callbacks_->filterConfigName()] =
+      fault_settings_->filterMetadata();
   decoder_callbacks_->sendLocalReply(http_status_code, "fault filter abort", nullptr, grpc_status,
                                      RcDetails::get().FaultAbort);
 }

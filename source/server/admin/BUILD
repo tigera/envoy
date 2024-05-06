@@ -2,17 +2,45 @@ load(
     "//bazel:envoy_build_system.bzl",
     "envoy_cc_library",
     "envoy_package",
+    "envoy_select_admin_functionality",
+    "envoy_select_admin_html",
+    "envoy_select_admin_no_html",
 )
 
 licenses(["notice"])  # Apache 2
 
-envoy_package()
+# Admin libraries are private (tests exempted) by default.
+# Any admin libraries with public visibility must have envoy_select_admin_functionality rules.
+envoy_package(["//test:__subpackages__"])
 
 envoy_cc_library(
     name = "admin_lib",
-    srcs = ["admin.cc"],
+    visibility = ["//visibility:public"],
+    deps = [] + envoy_select_admin_functionality(["//source/server/admin:admin_lib_internal"]),
+)
+
+envoy_cc_library(
+    name = "admin_factory_context",
+    hdrs = ["admin_factory_context.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//envoy/server:factory_context_interface",
+        "//envoy/server:instance_interface",
+        "//source/common/listener_manager:listener_info_lib",
+        "//source/server:factory_context_lib",
+    ],
+)
+
+envoy_cc_library(
+    name = "admin_lib_internal",
+    srcs = ["admin.cc"] + envoy_select_admin_html([
+        "admin_html.cc",
+    ]) + envoy_select_admin_no_html([
+        "admin_no_html.cc",
+    ]),
     hdrs = ["admin.h"],
     deps = [
+        ":admin_factory_context",
         ":admin_filter_lib",
         ":clusters_handler_lib",
         ":config_dump_handler_lib",
@@ -26,15 +54,14 @@ envoy_cc_library(
         ":server_info_handler_lib",
         ":stats_handler_lib",
         ":utils_lib",
-        "//include/envoy/filesystem:filesystem_interface",
-        "//include/envoy/http:filter_interface",
-        "//include/envoy/network:filter_interface",
-        "//include/envoy/network:listen_socket_interface",
-        "//include/envoy/server:admin_interface",
-        "//include/envoy/server:hot_restart_interface",
-        "//include/envoy/server:instance_interface",
-        "//include/envoy/server:listener_manager_interface",
-        "//include/envoy/server:options_interface",
+        "//envoy/http:filter_interface",
+        "//envoy/network:filter_interface",
+        "//envoy/network:listen_socket_interface",
+        "//envoy/server:admin_interface",
+        "//envoy/server:hot_restart_interface",
+        "//envoy/server:instance_interface",
+        "//envoy/server:listener_manager_interface",
+        "//envoy/server:options_interface",
         "//source/common/access_log:access_log_lib",
         "//source/common/buffer:buffer_lib",
         "//source/common/common:assert_lib",
@@ -45,7 +72,6 @@ envoy_cc_library(
         "//source/common/common:mutex_tracer_lib",
         "//source/common/common:utility_lib",
         "//source/common/formatter:substitution_formatter_lib",
-        "//source/common/html:utility_lib",
         "//source/common/http:codes_lib",
         "//source/common/http:conn_manager_lib",
         "//source/common/http:date_provider_lib",
@@ -53,6 +79,8 @@ envoy_cc_library(
         "//source/common/http:header_map_lib",
         "//source/common/http:headers_lib",
         "//source/common/http:utility_lib",
+        "//source/common/listener_manager:listener_info_lib",
+        "//source/common/listener_manager:listener_manager_lib",
         "//source/common/memory:utils_lib",
         "//source/common/network:connection_balancer_lib",
         "//source/common/network:listen_socket_lib",
@@ -62,8 +90,29 @@ envoy_cc_library(
         "//source/common/router:scoped_config_lib",
         "//source/common/stats:isolated_store_lib",
         "//source/extensions/access_loggers/common:file_access_log_lib",
+        "//source/extensions/http/header_validators/envoy_default:config",
         "//source/extensions/request_id/uuid:config",
-        "//source/server:listener_manager_lib",
+        "//source/server:null_overload_manager_lib",
+    ] + envoy_select_admin_html([
+        ":admin_html_util",
+    ]),
+)
+
+envoy_cc_library(
+    name = "admin_html_util",
+    srcs = [
+        "admin_html_util.cc",
+        "//source/server/admin/html:generate_admin_html",
+    ],
+    hdrs = [
+        "admin_html_util.h",
+    ],
+    deps = [
+        "//envoy/buffer:buffer_interface",
+        "//envoy/http:header_map_interface",
+        "//envoy/server:admin_interface",
+        "//source/common/html:utility_lib",
+        "//source/common/http:headers_lib",
     ],
 )
 
@@ -73,8 +122,8 @@ envoy_cc_library(
     hdrs = ["admin_filter.h"],
     deps = [
         ":utils_lib",
-        "//include/envoy/http:filter_interface",
-        "//include/envoy/server:admin_interface",
+        "//envoy/http:filter_interface",
+        "//envoy/server:admin_interface",
         "//source/common/buffer:buffer_lib",
         "//source/common/common:minimal_logger_lib",
         "//source/common/http:codes_lib",
@@ -87,8 +136,62 @@ envoy_cc_library(
     name = "handler_ctx_lib",
     hdrs = ["handler_ctx.h"],
     deps = [
-        "//include/envoy/server:instance_interface",
+        "//envoy/server:instance_interface",
     ],
+)
+
+envoy_cc_library(
+    name = "stats_params_lib",
+    srcs = ["stats_params.cc"],
+    hdrs = ["stats_params.h"],
+    deps = [
+        ":utils_lib",
+        "//envoy/buffer:buffer_interface",
+        "//envoy/http:codes_interface",
+        "//envoy/server:admin_interface",
+        "//source/common/stats:histogram_lib",
+    ],
+)
+
+envoy_cc_library(
+    name = "stats_request_lib",
+    srcs = ["stats_request.cc"],
+    hdrs = ["stats_request.h"],
+    deps = [
+        ":handler_ctx_lib",
+        ":prometheus_stats_lib",
+        ":stats_params_lib",
+        ":stats_render_lib",
+        ":utils_lib",
+        "//envoy/http:codes_interface",
+        "//source/common/http:codes_lib",
+        "//source/common/http:header_map_lib",
+        "//source/common/stats:histogram_lib",
+        "//source/common/upstream:host_utility_lib",
+        "@com_google_absl//absl/container:btree",
+    ],
+)
+
+envoy_cc_library(
+    name = "stats_render_lib",
+    srcs = ["stats_render.cc"] + envoy_select_admin_html([
+        "stats_html_render.cc",
+    ]),
+    hdrs = ["stats_render.h"] + envoy_select_admin_html([
+        "stats_html_render.h",
+    ]),
+    deps = [
+        ":stats_params_lib",
+        ":utils_lib",
+        "//envoy/server:admin_interface",
+        "//source/common/buffer:buffer_lib",
+        "//source/common/filesystem:filesystem_lib",
+        "//source/common/json:json_streamer_lib",
+        "//source/common/stats:histogram_lib",
+    ] + envoy_select_admin_html([
+        ":admin_html_util",
+        "//source/common/html:utility_lib",
+    ]),
 )
 
 envoy_cc_library(
@@ -98,15 +201,15 @@ envoy_cc_library(
     deps = [
         ":handler_ctx_lib",
         ":prometheus_stats_lib",
+        ":stats_render_lib",
+        ":stats_request_lib",
         ":utils_lib",
-        "//include/envoy/http:codes_interface",
-        "//include/envoy/server:admin_interface",
-        "//include/envoy/server:instance_interface",
+        "//envoy/http:codes_interface",
+        "//envoy/server:admin_interface",
+        "//envoy/server:instance_interface",
         "//source/common/buffer:buffer_lib",
-        "//source/common/html:utility_lib",
         "//source/common/http:codes_lib",
         "//source/common/http:header_map_lib",
-        "//source/common/stats:histogram_lib",
         "@envoy_api//envoy/admin/v3:pkg_cc_proto",
     ],
 )
@@ -116,9 +219,12 @@ envoy_cc_library(
     srcs = ["prometheus_stats.cc"],
     hdrs = ["prometheus_stats.h"],
     deps = [
+        ":stats_params_lib",
         ":utils_lib",
+        "//envoy/stats:custom_stat_namespaces_interface",
         "//source/common/buffer:buffer_lib",
         "//source/common/stats:histogram_lib",
+        "//source/common/upstream:host_utility_lib",
     ],
 )
 
@@ -129,9 +235,9 @@ envoy_cc_library(
     deps = [
         ":handler_ctx_lib",
         ":utils_lib",
-        "//include/envoy/http:codes_interface",
-        "//include/envoy/server:admin_interface",
-        "//include/envoy/server:instance_interface",
+        "//envoy/http:codes_interface",
+        "//envoy/server:admin_interface",
+        "//envoy/server:instance_interface",
         "//source/common/buffer:buffer_lib",
         "//source/common/http:codes_lib",
         "//source/common/http:header_map_lib",
@@ -146,9 +252,9 @@ envoy_cc_library(
     deps = [
         ":handler_ctx_lib",
         ":utils_lib",
-        "//include/envoy/http:codes_interface",
-        "//include/envoy/server:admin_interface",
-        "//include/envoy/server:instance_interface",
+        "//envoy/http:codes_interface",
+        "//envoy/server:admin_interface",
+        "//envoy/server:instance_interface",
         "//source/common/buffer:buffer_lib",
         "//source/common/http:codes_lib",
         "//source/common/http:header_map_lib",
@@ -162,9 +268,9 @@ envoy_cc_library(
     deps = [
         ":handler_ctx_lib",
         ":utils_lib",
-        "//include/envoy/http:codes_interface",
-        "//include/envoy/server:admin_interface",
-        "//include/envoy/server:instance_interface",
+        "//envoy/http:codes_interface",
+        "//envoy/server:admin_interface",
+        "//envoy/server:instance_interface",
         "//source/common/buffer:buffer_lib",
         "//source/common/common:minimal_logger_lib",
         "//source/common/http:codes_lib",
@@ -178,8 +284,8 @@ envoy_cc_library(
     hdrs = ["profiling_handler.h"],
     deps = [
         ":utils_lib",
-        "//include/envoy/http:codes_interface",
-        "//include/envoy/server:admin_interface",
+        "//envoy/http:codes_interface",
+        "//envoy/server:admin_interface",
         "//source/common/buffer:buffer_lib",
         "//source/common/http:codes_lib",
         "//source/common/http:header_map_lib",
@@ -194,9 +300,9 @@ envoy_cc_library(
     deps = [
         ":handler_ctx_lib",
         ":utils_lib",
-        "//include/envoy/http:codes_interface",
-        "//include/envoy/server:admin_interface",
-        "//include/envoy/server:instance_interface",
+        "//envoy/http:codes_interface",
+        "//envoy/server:admin_interface",
+        "//envoy/server:instance_interface",
         "//source/common/buffer:buffer_lib",
         "//source/common/http:codes_lib",
         "//source/common/http:header_map_lib",
@@ -210,14 +316,15 @@ envoy_cc_library(
     deps = [
         ":handler_ctx_lib",
         ":utils_lib",
-        "//include/envoy/http:codes_interface",
-        "//include/envoy/server:admin_interface",
-        "//include/envoy/server:instance_interface",
+        "//envoy/http:codes_interface",
+        "//envoy/server:admin_interface",
+        "//envoy/server:instance_interface",
         "//source/common/buffer:buffer_lib",
         "//source/common/http:codes_lib",
         "//source/common/http:header_map_lib",
         "//source/common/memory:stats_lib",
         "//source/common/version:version_includes",
+        "//source/server:utils_lib",
         "@envoy_api//envoy/admin/v3:pkg_cc_proto",
     ],
 )
@@ -229,9 +336,9 @@ envoy_cc_library(
     deps = [
         ":handler_ctx_lib",
         ":utils_lib",
-        "//include/envoy/http:codes_interface",
-        "//include/envoy/server:admin_interface",
-        "//include/envoy/server:instance_interface",
+        "//envoy/http:codes_interface",
+        "//envoy/server:admin_interface",
+        "//envoy/server:instance_interface",
         "//source/common/buffer:buffer_lib",
         "//source/common/http:codes_lib",
         "//source/common/http:header_map_lib",
@@ -248,10 +355,12 @@ envoy_cc_library(
         ":config_tracker_lib",
         ":handler_ctx_lib",
         ":utils_lib",
-        "//include/envoy/http:codes_interface",
-        "//include/envoy/server:admin_interface",
-        "//include/envoy/server:instance_interface",
+        "//envoy/http:codes_interface",
+        "//envoy/server:admin_interface",
+        "//envoy/server:instance_interface",
         "//source/common/buffer:buffer_lib",
+        "//source/common/common:matchers_lib",
+        "//source/common/common:statusor_lib",
         "//source/common/http:codes_lib",
         "//source/common/http:header_map_lib",
         "@envoy_api//envoy/admin/v3:pkg_cc_proto",
@@ -267,8 +376,8 @@ envoy_cc_library(
     deps = [
         ":handler_ctx_lib",
         ":utils_lib",
-        "//include/envoy/server:admin_interface",
-        "//include/envoy/server:instance_interface",
+        "//envoy/server:admin_interface",
+        "//envoy/server:instance_interface",
         "//source/common/http:codes_lib",
         "//source/common/http:header_map_lib",
         "@envoy_api//envoy/admin/v3:pkg_cc_proto",
@@ -280,7 +389,7 @@ envoy_cc_library(
     srcs = ["utils.cc"],
     hdrs = ["utils.h"],
     deps = [
-        "//include/envoy/init:manager_interface",
+        "//envoy/init:manager_interface",
         "//source/common/common:enum_to_int",
         "//source/common/http:codes_lib",
         "//source/common/http:header_map_lib",
@@ -293,8 +402,9 @@ envoy_cc_library(
     name = "config_tracker_lib",
     srcs = ["config_tracker_impl.cc"],
     hdrs = ["config_tracker_impl.h"],
+    visibility = ["//visibility:public"],
     deps = [
-        "//include/envoy/server:config_tracker_interface",
+        "//envoy/server:config_tracker_interface",
         "//source/common/common:assert_lib",
         "//source/common/common:macros",
     ],

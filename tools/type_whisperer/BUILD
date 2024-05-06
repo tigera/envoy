@@ -2,8 +2,8 @@ load("@rules_python//python:defs.bzl", "py_binary")
 load("//bazel:envoy_build_system.bzl", "envoy_cc_library", "envoy_package", "envoy_proto_library")
 load("//tools/type_whisperer:api_build_file.bzl", "api_build_file")
 load("//tools/type_whisperer:file_descriptor_set_text.bzl", "file_descriptor_set_text")
-load("//tools/type_whisperer:type_database.bzl", "type_database")
 load("//tools/type_whisperer:proto_cc_source.bzl", "proto_cc_source")
+load("//tools/type_whisperer:type_database.bzl", "type_database")
 
 licenses(["notice"])  # Apache 2
 
@@ -21,7 +21,7 @@ py_binary(
     deps = [
         ":types_py_proto",
         "//tools/api_proto_plugin",
-        "@com_github_cncf_udpa//udpa/annotations:pkg_py_proto",
+        "@com_github_cncf_xds//udpa/annotations:pkg_py_proto",
         "@com_google_protobuf//:protobuf_python",
     ],
 )
@@ -43,7 +43,7 @@ py_binary(
     srcs = ["file_descriptor_set_text_gen.py"],
     visibility = ["//visibility:public"],
     deps = [
-        "@com_github_cncf_udpa//udpa/annotations:pkg_py_proto",
+        "@com_github_cncf_xds//udpa/annotations:pkg_py_proto",
         "@com_google_protobuf//:protobuf_python",
     ],
 )
@@ -56,7 +56,7 @@ py_binary(
 
 label_flag(
     name = "api_type_db_target",
-    build_setting_default = "@envoy_api_canonical//versioning:active_protos",
+    build_setting_default = "@envoy_api//:all_protos",
     visibility = ["//visibility:public"],
 )
 
@@ -68,14 +68,14 @@ type_database(
 
 file_descriptor_set_text(
     name = "all_protos_pb_text",
-    deps = ["@envoy_api_canonical//:all_protos"],
+    deps = ["@envoy_api//:all_protos"],
 )
 
 file_descriptor_set_text(
     name = "all_protos_with_ext_pb_text",
     with_external_deps = True,
     deps = [
-        "@envoy_api_canonical//:all_protos",
+        "@envoy_api//:all_protos",
     ],
 )
 
@@ -102,7 +102,7 @@ envoy_cc_library(
     deps = [
         "//source/common/protobuf",
         "//tools/type_whisperer:api_type_db_proto_cc_proto",
-        "@com_github_cncf_udpa//udpa/annotations:pkg_cc_proto",
+        "@com_github_cncf_xds//udpa/annotations:pkg_cc_proto",
         "@com_google_absl//absl/container:node_hash_map",
     ],
 )

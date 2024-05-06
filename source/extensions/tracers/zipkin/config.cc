@@ -1,12 +1,11 @@
-#include "extensions/tracers/zipkin/config.h"
+#include "source/extensions/tracers/zipkin/config.h"
 
 #include "envoy/config/trace/v3/zipkin.pb.h"
 #include "envoy/config/trace/v3/zipkin.pb.validate.h"
 #include "envoy/registry/registry.h"
 
-#include "common/common/utility.h"
-
-#include "extensions/tracers/zipkin/zipkin_tracer_impl.h"
+#include "source/common/common/utility.h"
+#include "source/extensions/tracers/zipkin/zipkin_tracer_impl.h"
 
 namespace Envoy {
 namespace Extensions {
@@ -29,7 +28,7 @@ Tracing::DriverSharedPtr ZipkinTracerFactory::createTracerDriverTyped(
 /**
  * Static registration for the Zipkin tracer. @see RegisterFactory.
  */
-REGISTER_FACTORY(ZipkinTracerFactory, Server::Configuration::TracerFactory){"envoy.zipkin"};
+LEGACY_REGISTER_FACTORY(ZipkinTracerFactory, Server::Configuration::TracerFactory, "envoy.zipkin");
 
 } // namespace Zipkin
 } // namespace Tracers

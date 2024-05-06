@@ -10,6 +10,19 @@ licenses(["notice"])  # Apache 2
 envoy_package()
 
 envoy_cc_library(
+    name = "runtime_keys_lib",
+    srcs = [
+        "runtime_keys.cc",
+    ],
+    hdrs = [
+        "runtime_keys.h",
+    ],
+    deps = [
+        "@com_google_absl//absl/strings",
+    ],
+)
+
+envoy_cc_library(
     name = "runtime_features_lib",
     srcs = [
         "runtime_features.cc",
@@ -17,11 +30,25 @@ envoy_cc_library(
     hdrs = [
         "runtime_features.h",
     ],
+    # ABSL_FLAGS_STRIP_NAMES controls the behavior of the ABSL_FLAG
+    # macro. By default, it is defined on mobile platforms and false elsewhere.
+    # When defined, it causes flags to be registered in the global flag registry,
+    # which is required for Envoy runtime flags to work. By forcing this to be
+    # defined in source/common/runtime:runtime_features_lib, we ensure that
+    # even on mobile, runtime features work correctly since the ABSL_FLAGS
+    # which control them live in that target. This does NOT cause ABSL_FLAGS
+    # defined in other targets to be added to the registry, but that does not
+    # affect Envoy's usage.
+    copts = [
+        "-DABSL_FLAGS_STRIP_NAMES=0",
+    ],
     deps = [
         # AVOID ADDING TO THESE DEPENDENCIES IF POSSIBLE
         # Any code using runtime guards depends on this library, and the more dependencies there are,
         # the harder it is to runtime-guard without dependency loops.
-        "//include/envoy/runtime:runtime_interface",
+        "@com_google_absl//absl/flags:commandlineflag",
+        "@com_google_absl//absl/flags:flag",
+        "//envoy/runtime:runtime_interface",
         "//source/common/common:hash_lib",
         "//source/common/singleton:const_singleton",
     ],
@@ -33,7 +60,7 @@ envoy_cc_library(
         "runtime_protos.h",
     ],
     deps = [
-        "//include/envoy/runtime:runtime_interface",
+        "//envoy/runtime:runtime_interface",
         "//source/common/protobuf:utility_lib",
         "@envoy_api//envoy/config/core/v3:pkg_cc_proto",
         "@envoy_api//envoy/type/v3:pkg_cc_proto",
@@ -51,14 +78,14 @@ envoy_cc_library(
     deps = [
         ":runtime_features_lib",
         ":runtime_protos_lib",
-        "//include/envoy/config:subscription_interface",
-        "//include/envoy/event:dispatcher_interface",
-        "//include/envoy/init:manager_interface",
-        "//include/envoy/runtime:runtime_interface",
-        "//include/envoy/stats:stats_interface",
-        "//include/envoy/stats:stats_macros",
-        "//include/envoy/thread_local:thread_local_interface",
-        "//include/envoy/upstream:cluster_manager_interface",
+        "//envoy/config:subscription_interface",
+        "//envoy/event:dispatcher_interface",
+        "//envoy/init:manager_interface",
+        "//envoy/runtime:runtime_interface",
+        "//envoy/stats:stats_interface",
+        "//envoy/stats:stats_macros",
+        "//envoy/thread_local:thread_local_interface",
+        "//envoy/upstream:cluster_manager_interface",
         "//source/common/common:empty_string",
         "//source/common/common:minimal_logger_lib",
         "//source/common/common:thread_lib",
@@ -74,7 +101,6 @@ envoy_cc_library(
         "//source/common/protobuf:utility_lib",
         "@envoy_api//envoy/config/bootstrap/v3:pkg_cc_proto",
         "@envoy_api//envoy/config/core/v3:pkg_cc_proto",
-        "@envoy_api//envoy/service/discovery/v2:pkg_cc_proto",
         "@envoy_api//envoy/service/discovery/v3:pkg_cc_proto",
         "@envoy_api//envoy/service/runtime/v3:pkg_cc_proto",
         "@envoy_api//envoy/type/v3:pkg_cc_proto",

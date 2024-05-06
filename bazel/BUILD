@@ -1,8 +1,12 @@
-load("@rules_cc//cc:defs.bzl", "cc_library", "cc_proto_library")
-load("//bazel:envoy_build_system.bzl", "envoy_package")
-load("//bazel:envoy_internal.bzl", "envoy_select_force_libcpp")
 load("@bazel_skylib//lib:selects.bzl", "selects")
 load("@bazel_skylib//rules:common_settings.bzl", "bool_flag")
+load("@envoy_api//bazel:repository_locations.bzl", API_REPOSITORY_LOCATIONS_SPEC = "REPOSITORY_LOCATIONS_SPEC")
+load("@envoy_api//bazel:repository_locations_utils.bzl", "load_repository_locations_spec", "merge_dicts")
+load("@envoy_toolshed//:macros.bzl", "json_data")
+load("@envoy_toolshed//dependency:macros.bzl", "updater")
+load("//bazel:envoy_build_system.bzl", "envoy_package")
+load("//bazel:envoy_internal.bzl", "envoy_select_force_libcpp")
+load(":repository_locations.bzl", "REPOSITORY_LOCATIONS_SPEC")
 
 licenses(["notice"])  # Apache 2
 
@@ -13,15 +17,33 @@ exports_files([
     "sh_test_wrapper.sh",
     "test_for_benchmark_wrapper.sh",
     "repository_locations.bzl",
+    "exported_symbols.txt",
 ])
+
+sh_library(
+    name = "volatile_env",
+    srcs = ["volatile_env.sh"],
+)
+
+# Stamp derived from tree hash + dirty status if `BAZEL_VOLATILE_DIRTY`
+# is set, otherwise the git commit
+genrule(
+    name = "volatile-scm-hash",
+    outs = ["volatile-scm-hash.txt"],
+    cmd = """
+    grep BUILD_SCM_HASH bazel-out/volatile-status.txt > $@
+    """,
+    stamp = 1,
+    tags = ["no-remote-exec"],
+)
 
 genrule(
     name = "gnu_build_id",
     outs = ["gnu_build_id.ldscript"],
     cmd = """
       echo --build-id=0x$$(
-          grep BUILD_SCM_REVISION bazel-out/volatile-status.txt \\
-        | sed 's/^BUILD_SCM_REVISION //') \\
+          grep -E "^BUILD_SCM_REVISION" bazel-out/volatile-status.txt \
+        | sed 's/^BUILD_SCM_REVISION //') \
         > $@
     """,
     # Undocumented attr to depend on workspace status files.
@@ -34,8 +56,8 @@ genrule(
     name = "raw_build_id",
     outs = ["raw_build_id.ldscript"],
     cmd = """
-      grep BUILD_SCM_REVISION bazel-out/volatile-status.txt \\
-    | sed 's/^BUILD_SCM_REVISION //' \\
+      grep -E "^BUILD_SCM_REVISION" bazel-out/volatile-status.txt \
+    | sed 's/^BUILD_SCM_REVISION //' \
     | tr -d '\\n' \\
     > $@
     """,
@@ -170,6 +192,11 @@ config_setting(
 )
 
 config_setting(
+    name = "clang_pch_build",
+    values = {"define": "ENVOY_CLANG_PCH=1"},
+)
+
+config_setting(
     name = "gcc_build_gcc",
     flag_values = {
         "@bazel_tools//tools/cpp:compiler": "gcc",
@@ -278,6 +305,11 @@ config_setting(
 )
 
 config_setting(
+    name = "disable_library_autolink",
+    values = {"define": "library_autolink=disabled"},
+)
+
+config_setting(
     name = "disable_object_dump_on_signal_trace",
     values = {"define": "object_dump_on_signal_trace=disabled"},
 )
@@ -287,10 +319,19 @@ config_setting(
     values = {"define": "deprecated_features=disabled"},
 )
 
+selects.config_setting_group(
+    name = "disable_hot_restart_or_admin",
+    match_any = [
+        "//bazel:disable_hot_restart",
+        "//bazel:disable_admin_functionality",
+    ],
+)
+
 bool_flag(
     name = "http3",
     build_setting_default = True,
-    visibility = ["//visibility:private"],
+    # TODO(keith): make private again https://github.com/bazelbuild/bazel-skylib/issues/404
+    # visibility = ["//visibility:private"],
 )
 
 config_setting(
@@ -298,7 +339,8 @@ config_setting(
     flag_values = {
         ":http3": "False",
     },
-    visibility = ["//visibility:private"],
+    # TODO(keith): make private again https://github.com/bazelbuild/bazel-skylib/issues/404
+    # visibility = ["//visibility:private"],
 )
 
 selects.config_setting_group(
@@ -310,9 +352,62 @@ selects.config_setting_group(
 )
 
 config_setting(
+    name = "disable_admin_html",
+    values = {"define": "admin_html=disabled"},
+)
+
+config_setting(
+    name = "disable_static_extension_registration",
+    values = {"define": "static_extension_registration=disabled"},
+)
+
+config_setting(
+    name = "disable_envoy_mobile_xds",
+    values = {"define": "envoy_mobile_xds=disabled"},
+)
+
+config_setting(
+    name = "disable_yaml",
+    values = {"define": "envoy_yaml=disabled"},
+)
+
+# The goal here is to allow Envoy to build with this option but it is not yet
+# complete.  See https://github.com/envoyproxy/envoy/issues/27412
+config_setting(
+    name = "disable_exceptions",
+    values = {"define": "envoy_exceptions=disabled"},
+)
+
+config_setting(
+    name = "disable_full_protos",
+    values = {"define": "envoy_full_protos=disabled"},
+)
+
+config_setting(
+    name = "disable_envoy_mobile_listener",
+    values = {"define": "envoy_mobile_listener=disabled"},
+)
+
+config_setting(
+    name = "disable_http_datagrams",
+    values = {"define": "envoy_enable_http_datagrams=disabled"},
+)
+
+config_setting(
+    name = "disable_logging",
+    values = {"define": "enable_logging=disabled"},
+)
+
+config_setting(
+    name = "disable_admin_functionality",
+    values = {"define": "admin_functionality=disabled"},
+)
+
+config_setting(
     name = "disable_hot_restart_setting",
     values = {"define": "hot_restart=disabled"},
-    visibility = ["//visibility:private"],
+    # TODO(keith): make private again https://github.com/bazelbuild/bazel-skylib/issues/404
+    # visibility = ["//visibility:private"],
 )
 
 selects.config_setting_group(
@@ -364,6 +459,11 @@ config_setting(
 )
 
 config_setting(
+    name = "enable_perf_tracing",
+    values = {"define": "perf_tracing=enabled"},
+)
+
+config_setting(
     name = "force_libcpp",
     values = {"define": "force_libcpp=enabled"},
 )
@@ -371,8 +471,7 @@ config_setting(
 config_setting(
     name = "boringssl_fips",
     constraint_values = [
-        "@bazel_tools//platforms:linux",
-        "@bazel_tools//platforms:x86_64",
+        "@platforms//os:linux",
     ],
     values = {"define": "boringssl=fips"},
 )
@@ -385,7 +484,7 @@ config_setting(
 config_setting(
     name = "zlib_ng",
     constraint_values = [
-        "@bazel_tools//platforms:linux",
+        "@platforms//os:linux",
     ],
     values = {"define": "zlib=ng"},
 )
@@ -402,13 +501,28 @@ config_setting(
 )
 
 config_setting(
+    name = "wasm_wamr",
+    values = {"define": "wasm=wamr"},
+)
+
+config_setting(
     name = "wasm_wasmtime",
     values = {"define": "wasm=wasmtime"},
 )
 
 config_setting(
-    name = "wasm_none",
+    name = "wasm_disabled",
     values = {"define": "wasm=disabled"},
+)
+
+# This config setting enables Universal Header Validator and disables
+# HTTP header compliance checks in codecs.
+# This setting is temporary to transition header validation into UHV without
+# impacting production builds of Envoy.
+# This setting is enabled for the bazel.compile_time_options CI target.
+config_setting(
+    name = "uhv_enabled",
+    values = {"define": "uhv=enabled"},
 )
 
 # Alias pointing to the selected version of BoringSSL:
@@ -419,6 +533,14 @@ alias(
     actual = select({
         "//bazel:boringssl_fips": "@boringssl_fips//:ssl",
         "//conditions:default": "@boringssl//:ssl",
+    }),
+)
+
+alias(
+    name = "boringcrypto",
+    actual = select({
+        "//bazel:boringssl_fips": "@boringssl_fips//:crypto",
+        "//conditions:default": "@boringssl//:crypto",
     }),
 )
 
@@ -495,6 +617,11 @@ config_setting(
 )
 
 config_setting(
+    name = "ios_sim_arm64",
+    values = {"cpu": "ios_sim_arm64"},
+)
+
+config_setting(
     name = "ios_arm64e",
     values = {"cpu": "ios_arm64e"},
 )
@@ -505,8 +632,28 @@ config_setting(
 )
 
 config_setting(
+    name = "android",
+    constraint_values = [
+        "@platforms//os:android",
+    ],
+)
+
+selects.config_setting_group(
+    name = "android_opt",
+    match_all = [
+        ":opt_build",
+        ":android",
+    ],
+)
+
+config_setting(
     name = "android_logger",
     values = {"define": "logger=android"},
+)
+
+config_setting(
+    name = "android_system_helper",
+    values = {"define": "system-helper=android"},
 )
 
 config_setting(
@@ -540,13 +687,47 @@ selects.config_setting_group(
     name = "apple",
     match_any = [
         ":darwin",
+        ":darwin_arm64",
         ":darwin_x86_64",
         ":ios_arm64",
         ":ios_arm64e",
         ":ios_armv7",
         ":ios_armv7s",
         ":ios_i386",
+        ":ios_sim_arm64",
         ":ios_x86_64",
+    ],
+)
+
+selects.config_setting_group(
+    name = "apple_dbg",
+    match_all = [
+        ":apple",
+        ":dbg_build",
+    ],
+)
+
+selects.config_setting_group(
+    name = "apple_opt",
+    match_all = [
+        ":opt_build",
+        ":apple",
+    ],
+)
+
+selects.config_setting_group(
+    name = "apple_fastbuild",
+    match_all = [
+        ":apple",
+        ":fastbuild_build",
+    ],
+)
+
+selects.config_setting_group(
+    name = "apple_non_opt",
+    match_any = [
+        ":apple_dbg",
+        ":apple_fastbuild",
     ],
 )
 
@@ -571,7 +752,159 @@ selects.config_setting_group(
     ],
 )
 
+selects.config_setting_group(
+    name = "not_x86",
+    match_any = [
+        ":darwin_arm64",
+        ":ios_arm64",
+        ":ios_arm64e",
+        ":ios_armv7",
+        ":ios_armv7s",
+        ":ios_i386",
+        ":ios_sim_arm64",
+        ":linux_aarch64",
+        ":linux_mips64",
+        ":linux_ppc",
+        ":linux_s390x",
+    ],
+)
+
+selects.config_setting_group(
+    name = "not_x86_or_wasm_disabled",
+    match_any = [
+        ":not_x86",
+        ":wasm_disabled",
+    ],
+)
+
 alias(
     name = "remote_jdk11",
     actual = "@bazel_tools//tools/jdk:remote_jdk11",
+)
+
+alias(
+    name = "windows",
+    actual = "@bazel_tools//src/conditions:windows",
+)
+
+json_data(
+    name = "repository_locations",
+    data = load_repository_locations_spec(REPOSITORY_LOCATIONS_SPEC),
+)
+
+json_data(
+    name = "all_repository_locations",
+    data = merge_dicts(
+        load_repository_locations_spec(REPOSITORY_LOCATIONS_SPEC),
+        load_repository_locations_spec(API_REPOSITORY_LOCATIONS_SPEC),
+    ),
+)
+
+platform(
+    name = "android_aarch64",
+    constraint_values = [
+        "@platforms//cpu:aarch64",
+        "@platforms//os:android",
+    ],
+)
+
+platform(
+    name = "android_armeabi",
+    constraint_values = [
+        "@platforms//cpu:armv7",
+        "@platforms//os:android",
+    ],
+)
+
+platform(
+    name = "android_x86",
+    constraint_values = [
+        "@platforms//cpu:x86_32",
+        "@platforms//os:android",
+    ],
+)
+
+platform(
+    name = "android_x86_64",
+    constraint_values = [
+        "@platforms//cpu:x86_64",
+        "@platforms//os:android",
+    ],
+)
+
+platform(
+    name = "macos_x86_64",
+    constraint_values = [
+        "@platforms//cpu:x86_64",
+        "@platforms//os:macos",
+    ],
+)
+
+platform(
+    name = "macos_arm64",
+    constraint_values = [
+        "@platforms//cpu:arm64",
+        "@platforms//os:macos",
+    ],
+)
+
+platform(
+    name = "ios_x86_64_platform",  # TODO(keith): Resolve duplicate name issue
+    constraint_values = [
+        "@platforms//cpu:x86_64",
+        "@platforms//os:ios",
+        "@build_bazel_apple_support//constraints:simulator",
+    ],
+)
+
+platform(
+    name = "ios_sim_arm64_platform",  # TODO(keith): Resolve duplicate name issue
+    constraint_values = [
+        "@platforms//cpu:arm64",
+        "@platforms//os:ios",
+        "@build_bazel_apple_support//constraints:simulator",
+    ],
+)
+
+platform(
+    name = "ios_arm64_platform",  # TODO(keith): Resolve duplicate name issue
+    constraint_values = [
+        "@platforms//cpu:arm64",
+        "@platforms//os:ios",
+        "@build_bazel_apple_support//constraints:device",
+    ],
+)
+
+# A dependency required by python protobuf
+# Envoy does not have any C++ code that includes python.h so this dummy
+# target is enough. However if such code is added in the future when this
+# should be changed to alias "@system_python//:python_headers"
+cc_library(
+    name = "python_headers",
+    visibility = ["//visibility:public"],
+)
+
+# These can be run as follows:
+#
+# $ bazel run //bazel:update ENVOY_DEP NEW_VERSION
+# $ bazel run //bazel:api-update API_DEP NEW_VERSION
+updater(
+    name = "update",
+    data = ["//tools/dependency:check"],
+    dependencies = "//tools/dependency:filtered-dependencies",
+    post_script = ":version_update_post.sh",
+    pydict = True,
+    tags = ["skip_on_windows"],
+    version_file = ":repository_locations.bzl",
+)
+
+updater(
+    name = "api-update",
+    data = ["//tools/dependency:check"],
+    dependencies = "@envoy_api//bazel:repository_locations",
+    post_script = ":version_update_post.sh",
+    pydict = True,
+    tags = ["skip_on_windows"],
+    version_file = "@envoy_api//bazel:repository_locations.bzl",
+    version_path_replace = "external/envoy_api:api",
 )

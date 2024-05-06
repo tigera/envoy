@@ -1,7 +1,7 @@
 #include "envoy/extensions/filters/http/grpc_http1_reverse_bridge/v3/config.pb.h"
 
-#include "extensions/filters/http/grpc_http1_reverse_bridge/config.h"
-#include "extensions/filters/http/grpc_http1_reverse_bridge/filter.h"
+#include "source/extensions/filters/http/grpc_http1_reverse_bridge/config.h"
+#include "source/extensions/filters/http/grpc_http1_reverse_bridge/filter.h"
 
 #include "test/mocks/server/factory_context.h"
 #include "test/mocks/server/instance.h"
@@ -29,7 +29,7 @@ withhold_grpc_frames: true
   NiceMock<Server::Configuration::MockFactoryContext> context;
   Config config_factory;
   Http::FilterFactoryCb cb =
-      config_factory.createFilterFactoryFromProto(proto_config, "stats", context);
+      config_factory.createFilterFactoryFromProto(proto_config, "stats", context).value();
   Http::MockFilterChainFactoryCallbacks filter_callback;
   EXPECT_CALL(filter_callback, addStreamFilter(_));
   cb(filter_callback);

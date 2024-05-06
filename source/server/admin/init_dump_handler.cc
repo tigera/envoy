@@ -1,29 +1,19 @@
-#include "server/admin/init_dump_handler.h"
+#include "source/server/admin/init_dump_handler.h"
 
-#include "common/http/headers.h"
-#include "common/http/utility.h"
-#include "common/network/utility.h"
-
-#include "server/admin/utils.h"
+#include "source/common/http/headers.h"
+#include "source/common/http/utility.h"
+#include "source/common/network/utility.h"
+#include "source/server/admin/utils.h"
 
 namespace Envoy {
 namespace Server {
 
-namespace {
-// Helper method to get the mask parameter.
-absl::optional<std::string> maskParam(const Http::Utility::QueryParams& params) {
-  return Utility::queryParam(params, "mask");
-}
-
-} // namespace
-
 InitDumpHandler::InitDumpHandler(Server::Instance& server) : HandlerContextBase(server) {}
 
-Http::Code InitDumpHandler::handlerInitDump(absl::string_view url,
-                                            Http::ResponseHeaderMap& response_headers,
-                                            Buffer::Instance& response, AdminStream&) const {
-  Http::Utility::QueryParams query_params = Http::Utility::parseAndDecodeQueryString(url);
-  const auto mask = maskParam(query_params);
+Http::Code InitDumpHandler::handlerInitDump(Http::ResponseHeaderMap& response_headers,
+                                            Buffer::Instance& response,
+                                            AdminStream& admin_stream) const {
+  const auto mask = admin_stream.queryParams().getFirstValue("mask");
 
   envoy::admin::v3::UnreadyTargetsDumps dump = *dumpUnreadyTargets(mask);
   MessageUtil::redact(dump);

@@ -21,29 +21,30 @@
 #include "envoy/ssl/context_manager.h"
 #include "envoy/stats/stats_macros.h"
 #include "envoy/stats/timespan.h"
-#include "envoy/tracing/http_tracer.h"
+#include "envoy/tracing/tracer.h"
 
-#include "common/access_log/access_log_manager_impl.h"
-#include "common/common/assert.h"
-#include "common/common/cleanup.h"
-#include "common/common/logger_delegates.h"
-#include "common/grpc/async_client_manager_impl.h"
-#include "common/grpc/context_impl.h"
-#include "common/http/context_impl.h"
-#include "common/init/manager_impl.h"
-#include "common/memory/heap_shrinker.h"
-#include "common/protobuf/message_validator_impl.h"
-#include "common/router/context_impl.h"
-#include "common/runtime/runtime_impl.h"
-#include "common/secret/secret_manager_impl.h"
-#include "common/upstream/health_discovery_service.h"
+#include "source/common/access_log/access_log_manager_impl.h"
+#include "source/common/common/assert.h"
+#include "source/common/common/cleanup.h"
+#include "source/common/common/logger_delegates.h"
+#include "source/common/common/perf_tracing.h"
+#include "source/common/grpc/async_client_manager_impl.h"
+#include "source/common/grpc/context_impl.h"
+#include "source/common/http/context_impl.h"
+#include "source/common/init/manager_impl.h"
+#include "source/common/protobuf/message_validator_impl.h"
+#include "source/common/quic/quic_stat_names.h"
+#include "source/common/router/context_impl.h"
+#include "source/common/runtime/runtime_impl.h"
+#include "source/common/secret/secret_manager_impl.h"
+#include "source/common/upstream/health_discovery_service.h"
 
-#include "server/admin/admin.h"
-#include "server/configuration_impl.h"
-#include "server/listener_hooks.h"
-#include "server/listener_manager_impl.h"
-#include "server/overload_manager_impl.h"
-#include "server/worker_impl.h"
+#ifdef ENVOY_ADMIN_FUNCTIONALITY
+#include "source/server/admin/admin.h"
+#endif
+#include "source/server/configuration_impl.h"
+#include "source/server/listener_hooks.h"
+#include "source/server/worker_impl.h"
 
 #include "absl/container/node_hash_map.h"
 #include "absl/types/optional.h"
@@ -71,6 +72,7 @@ struct ServerCompilationSettingsStats {
   COUNTER(envoy_bug_failures)                                                                      \
   COUNTER(dynamic_unknown_fields)                                                                  \
   COUNTER(static_unknown_fields)                                                                   \
+  COUNTER(wip_protos)                                                                              \
   COUNTER(dropped_stat_flushes)                                                                    \
   GAUGE(concurrency, NeverImport)                                                                  \
   GAUGE(days_until_first_cert_expiring, NeverImport)                                               \
@@ -129,7 +131,7 @@ public:
    * @param store provides the store being flushed.
    */
   static void flushMetricsToSinks(const std::list<Stats::SinkPtr>& sinks, Stats::Store& store,
-                                  TimeSource& time_source);
+                                  Upstream::ClusterManager& cm, TimeSource& time_source);
 
   /**
    * Load a bootstrap config and perform validation.
@@ -145,7 +147,7 @@ public:
 };
 
 /**
- * This is a helper used by InstanceImpl::run() on the stack. It's broken out to make testing
+ * This is a helper used by InstanceBase::run() on the stack. It's broken out to make testing
  * easier.
  */
 class RunHelper : Logger::Loggable<Logger::Id::main> {
@@ -174,7 +176,7 @@ public:
 
   // Configuration::ServerFactoryContext
   Upstream::ClusterManager& clusterManager() override { return server_.clusterManager(); }
-  Event::Dispatcher& dispatcher() override { return server_.dispatcher(); }
+  Event::Dispatcher& mainThreadDispatcher() override { return server_.dispatcher(); }
   const Server::Options& options() override { return server_.options(); }
   const LocalInfo::LocalInfo& localInfo() const override { return server_.localInfo(); }
   ProtobufMessage::ValidationContext& messageValidationContext() override {
@@ -182,23 +184,30 @@ public:
   }
   Envoy::Runtime::Loader& runtime() override { return server_.runtime(); }
   Stats::Scope& scope() override { return *server_scope_; }
+  Stats::Scope& serverScope() override { return *server_scope_; }
   Singleton::Manager& singletonManager() override { return server_.singletonManager(); }
   ThreadLocal::Instance& threadLocal() override { return server_.threadLocal(); }
-  Admin& admin() override { return server_.admin(); }
+  OptRef<Admin> admin() override { return server_.admin(); }
   TimeSource& timeSource() override { return api().timeSource(); }
+  AccessLog::AccessLogManager& accessLogManager() override { return server_.accessLogManager(); }
   Api::Api& api() override { return server_.api(); }
+  Http::Context& httpContext() override { return server_.httpContext(); }
   Grpc::Context& grpcContext() override { return server_.grpcContext(); }
   Router::Context& routerContext() override { return server_.routerContext(); }
+  ProcessContextOptRef processContext() override { return server_.processContext(); }
   Envoy::Server::DrainManager& drainManager() override { return server_.drainManager(); }
   ServerLifecycleNotifier& lifecycleNotifier() override { return server_.lifecycleNotifier(); }
   Configuration::StatsConfig& statsConfig() override { return server_.statsConfig(); }
+  envoy::config::bootstrap::v3::Bootstrap& bootstrap() override { return server_.bootstrap(); }
+  OverloadManager& overloadManager() override { return server_.overloadManager(); }
+  bool healthCheckFailed() const override { return server_.healthCheckFailed(); }
 
   // Configuration::TransportSocketFactoryContext
+  ServerFactoryContext& serverFactoryContext() override { return *this; }
   Ssl::ContextManager& sslContextManager() override { return server_.sslContextManager(); }
   Secret::SecretManager& secretManager() override { return server_.secretManager(); }
-  Stats::Store& stats() override { return server_.stats(); }
+  Stats::Scope& statsScope() override { return *server_scope_; }
   Init::Manager& initManager() override { return server_.initManager(); }
-  AccessLog::AccessLogManager& accessLogManager() override { return server_.accessLogManager(); }
   ProtobufMessage::ValidationVisitor& messageValidationVisitor() override {
     // Server has two message validation visitors, one for static and
     // other for dynamic configuration. Choose the dynamic validation
@@ -212,40 +221,48 @@ public:
 
 private:
   Instance& server_;
-  Stats::ScopePtr server_scope_;
+  Stats::ScopeSharedPtr server_scope_;
 };
 
 /**
- * This is the actual full standalone server which stitches together various common components.
+ * This is the base class for the standalone server which stitches together various common
+ * components. Some components are optional (so PURE) and can be created or not by subclasses.
  */
-class InstanceImpl final : Logger::Loggable<Logger::Id::main>,
-                           public Instance,
-                           public ServerLifecycleNotifier {
+class InstanceBase : Logger::Loggable<Logger::Id::main>,
+                     public Instance,
+                     public ServerLifecycleNotifier {
 public:
   /**
    * @throw EnvoyException if initialization fails.
    */
-  InstanceImpl(Init::Manager& init_manager, const Options& options, Event::TimeSystem& time_system,
-               Network::Address::InstanceConstSharedPtr local_address, ListenerHooks& hooks,
-               HotRestart& restarter, Stats::StoreRoot& store,
-               Thread::BasicLockable& access_log_lock, ComponentFactory& component_factory,
+  InstanceBase(Init::Manager& init_manager, const Options& options, Event::TimeSystem& time_system,
+               ListenerHooks& hooks, HotRestart& restarter, Stats::StoreRoot& store,
+               Thread::BasicLockable& access_log_lock,
                Random::RandomGeneratorPtr&& random_generator, ThreadLocal::Instance& tls,
                Thread::ThreadFactory& thread_factory, Filesystem::Instance& file_system,
                std::unique_ptr<ProcessContext> process_context,
                Buffer::WatermarkFactorySharedPtr watermark_factory = nullptr);
 
-  ~InstanceImpl() override;
+  // initialize the server. This must be called before run().
+  void initialize(Network::Address::InstanceConstSharedPtr local_address,
+                  ComponentFactory& component_factory);
+  ~InstanceBase() override;
 
-  void run();
+  virtual void maybeCreateHeapShrinker() PURE;
+  virtual std::unique_ptr<OverloadManager> createOverloadManager() PURE;
+  virtual std::unique_ptr<Server::GuardDog> maybeCreateGuardDog(absl::string_view name) PURE;
+
+  void run() override;
 
   // Server::Instance
-  Admin& admin() override { return *admin_; }
+  OptRef<Admin> admin() override { return makeOptRefFromPtr(admin_.get()); }
   Api::Api& api() override { return *api_; }
   Upstream::ClusterManager& clusterManager() override;
+  const Upstream::ClusterManager& clusterManager() const override;
   Ssl::ContextManager& sslContextManager() override { return *ssl_context_manager_; }
   Event::Dispatcher& dispatcher() override { return *dispatcher_; }
   Network::DnsResolverSharedPtr dnsResolver() override { return dns_resolver_; }
-  void drainListeners() override;
+  void drainListeners(OptRef<const Network::ExtraShutdownListenerOptions> options) override;
   DrainManager& drainManager() override { return *drain_manager_; }
   AccessLog::AccessLogManager& accessLogManager() override { return access_log_manager_; }
   void failHealthcheck(bool fail) override;
@@ -274,21 +291,24 @@ public:
   LocalInfo::LocalInfo& localInfo() const override { return *local_info_; }
   TimeSource& timeSource() override { return time_source_; }
   void flushStats() override;
-
   Configuration::StatsConfig& statsConfig() override { return config_.statsConfig(); }
-
+  envoy::config::bootstrap::v3::Bootstrap& bootstrap() override { return bootstrap_; }
   Configuration::ServerFactoryContext& serverFactoryContext() override { return server_contexts_; }
-
   Configuration::TransportSocketFactoryContext& transportSocketFactoryContext() override {
     return server_contexts_;
   }
-
   ProtobufMessage::ValidationContext& messageValidationContext() override {
     return validation_context_;
   }
-
   void setDefaultTracingConfig(const envoy::config::trace::v3::Tracing& tracing_config) override {
     http_context_.setDefaultTracingConfig(tracing_config);
+  }
+  bool enableReusePortDefault() override;
+
+  Quic::QuicStatNames& quicStatNames() { return quic_stat_names_; }
+
+  void setSinkPredicates(std::unique_ptr<Envoy::Stats::SinkPredicates>&& sink_predicates) override {
+    stats_store_.setSinkPredicates(std::move(sink_predicates));
   }
 
   // ServerLifecycleNotifier
@@ -296,17 +316,24 @@ public:
   ServerLifecycleNotifier::HandlePtr
   registerCallback(Stage stage, StageCallbackWithCompletion callback) override;
 
+protected:
+  const Configuration::MainImpl& config() { return config_; }
+
 private:
+  Network::DnsResolverSharedPtr getOrCreateDnsResolver();
+
   ProtobufTypes::MessagePtr dumpBootstrapConfig();
   void flushStatsInternal();
   void updateServerStats();
-  void initialize(const Options& options, Network::Address::InstanceConstSharedPtr local_address,
-                  ComponentFactory& component_factory, ListenerHooks& hooks);
+  // This does most of the work of initialization, but can throw errors caught
+  // by initialize().
+  void initializeOrThrow(Network::Address::InstanceConstSharedPtr local_address,
+                         ComponentFactory& component_factory);
   void loadServerFlags(const absl::optional<std::string>& flags_path);
   void startWorkers();
   void terminate();
   void notifyCallbacksForStage(
-      Stage stage, Event::PostCb completion_cb = [] {});
+      Stage stage, std::function<void()> completion_cb = [] {});
   void onRuntimeReady();
   void onClusterManagerPrimaryInitializationComplete();
 
@@ -323,9 +350,9 @@ private:
   // - There may be active clusters referencing it in config_.cluster_manager_.
   // - There may be active connections referencing it.
   std::unique_ptr<Secret::SecretManager> secret_manager_;
-  bool workers_started_;
+  bool workers_started_{false};
   std::atomic<bool> live_;
-  bool shutdown_;
+  bool shutdown_{false};
   const Options& options_;
   ProtobufMessage::ProdValidationContextImpl validation_context_;
   TimeSource& time_source_;
@@ -343,14 +370,17 @@ private:
   Assert::ActionRegistrationPtr envoy_bug_action_registration_;
   ThreadLocal::Instance& thread_local_;
   Random::RandomGeneratorPtr random_generator_;
+  envoy::config::bootstrap::v3::Bootstrap bootstrap_;
   Api::ApiPtr api_;
+  // ssl_context_manager_ must come before dispatcher_, since ClusterInfo
+  // references SslSocketFactory and is deleted on the main thread via the dispatcher.
+  std::unique_ptr<Ssl::ContextManager> ssl_context_manager_;
   Event::DispatcherPtr dispatcher_;
-  std::unique_ptr<AdminImpl> admin_;
+  AccessLog::AccessLogManagerImpl access_log_manager_;
+  std::unique_ptr<Admin> admin_;
   Singleton::ManagerPtr singleton_manager_;
   Network::ConnectionHandlerPtr handler_;
-  std::unique_ptr<Runtime::ScopedLoaderSingleton> runtime_singleton_;
-  std::unique_ptr<Ssl::ContextManager> ssl_context_manager_;
-  ProdListenerComponentFactory listener_component_factory_;
+  std::unique_ptr<Runtime::Loader> runtime_;
   ProdWorkerFactory worker_factory_;
   std::unique_ptr<ListenerManager> listener_manager_;
   absl::node_hash_map<Stage, LifecycleNotifierCallbacks> stage_callbacks_;
@@ -359,32 +389,31 @@ private:
   Network::DnsResolverSharedPtr dns_resolver_;
   Event::TimerPtr stat_flush_timer_;
   DrainManagerPtr drain_manager_;
-  AccessLog::AccessLogManagerImpl access_log_manager_;
   std::unique_ptr<Upstream::ClusterManagerFactory> cluster_manager_factory_;
   std::unique_ptr<Server::GuardDog> main_thread_guard_dog_;
   std::unique_ptr<Server::GuardDog> worker_guard_dog_;
-  bool terminated_;
+  bool terminated_{false};
   std::unique_ptr<Logger::FileSinkDelegate> file_logger_;
-  envoy::config::bootstrap::v3::Bootstrap bootstrap_;
   ConfigTracker::EntryOwnerPtr config_tracker_entry_;
   SystemTime bootstrap_config_update_time_;
   Grpc::AsyncClientManagerPtr async_client_manager_;
   Upstream::ProdClusterInfoFactory info_factory_;
   Upstream::HdsDelegatePtr hds_delegate_;
-  std::unique_ptr<OverloadManagerImpl> overload_manager_;
+  std::unique_ptr<OverloadManager> overload_manager_;
   std::vector<BootstrapExtensionPtr> bootstrap_extensions_;
   Envoy::MutexTracer* mutex_tracer_;
   Grpc::ContextImpl grpc_context_;
   Http::ContextImpl http_context_;
   Router::ContextImpl router_context_;
   std::unique_ptr<ProcessContext> process_context_;
-  std::unique_ptr<Memory::HeapShrinker> heap_shrinker_;
   // initialization_time is a histogram for tracking the initialization time across hot restarts
   // whenever we have support for histogram merge across hot restarts.
   Stats::TimespanPtr initialization_timer_;
   ListenerHooks& hooks_;
-
+  Quic::QuicStatNames quic_stat_names_;
   ServerFactoryContextImpl server_contexts_;
+  bool enable_reuse_port_default_{false};
+  Regex::EnginePtr regex_engine_;
 
   bool stats_flush_in_progress_ : 1;
 
@@ -394,6 +423,11 @@ private:
     LifecycleCallbackHandle(std::list<T>& callbacks, T& callback)
         : RaiiListElement<T>(callbacks, callback) {}
   };
+
+#ifdef ENVOY_PERFETTO
+  std::unique_ptr<perfetto::TracingSession> tracing_session_{};
+  os_fd_t tracing_fd_{INVALID_HANDLE};
+#endif
 };
 
 // Local implementation of Stats::MetricSnapshot used to flush metrics to sinks. We could
@@ -405,7 +439,8 @@ private:
 //                     copying and probably be a cleaner API in general.
 class MetricSnapshotImpl : public Stats::MetricSnapshot {
 public:
-  explicit MetricSnapshotImpl(Stats::Store& store, TimeSource& time_source);
+  explicit MetricSnapshotImpl(Stats::Store& store, Upstream::ClusterManager& cluster_manager,
+                              TimeSource& time_source);
 
   // Stats::MetricSnapshot
   const std::vector<CounterSnapshot>& counters() override { return counters_; }
@@ -418,6 +453,10 @@ public:
   const std::vector<std::reference_wrapper<const Stats::TextReadout>>& textReadouts() override {
     return text_readouts_;
   }
+  const std::vector<Stats::PrimitiveCounterSnapshot>& hostCounters() override {
+    return host_counters_;
+  }
+  const std::vector<Stats::PrimitiveGaugeSnapshot>& hostGauges() override { return host_gauges_; }
   SystemTime snapshotTime() const override { return snapshot_time_; }
 
 private:
@@ -429,6 +468,8 @@ private:
   std::vector<std::reference_wrapper<const Stats::ParentHistogram>> histograms_;
   std::vector<Stats::TextReadoutSharedPtr> snapped_text_readouts_;
   std::vector<std::reference_wrapper<const Stats::TextReadout>> text_readouts_;
+  std::vector<Stats::PrimitiveCounterSnapshot> host_counters_;
+  std::vector<Stats::PrimitiveGaugeSnapshot> host_gauges_;
   SystemTime snapshot_time_;
 };
 

@@ -4,11 +4,11 @@
 
 #include "envoy/event/dispatcher.h"
 
-#include "common/common/assert.h"
-#include "common/common/lock_guard.h"
-#include "common/event/real_time_system.h"
-#include "common/event/timer_impl.h"
-#include "common/runtime/runtime_features.h"
+#include "source/common/common/assert.h"
+#include "source/common/common/lock_guard.h"
+#include "source/common/event/real_time_system.h"
+#include "source/common/event/timer_impl.h"
+#include "source/common/runtime/runtime_features.h"
 
 namespace Envoy {
 namespace Event {
@@ -330,8 +330,16 @@ void SimulatedTimeSystemHelper::Alarm::Alarm::disableTimer() {
   simulated_scheduler_.disableAlarm(*this);
 }
 
+void SimulatedTimeSystemHelper::maybeLogTimerWarning() {
+  if (++warning_logged_ == 1) {
+    ENVOY_LOG_MISC(warn, "Simulated timer enabled. Use advanceTimeWait or "
+                         "advanceTimeAsync functions to ensure it is called.");
+  }
+}
+
 void SimulatedTimeSystemHelper::Alarm::Alarm::enableHRTimer(
     const std::chrono::microseconds duration, const ScopeTrackedObject* /*scope*/) {
+  time_system_.maybeLogTimerWarning();
   simulated_scheduler_.enableAlarm(*this, duration);
 }
 
@@ -347,7 +355,7 @@ static int instance_count = 0;
 // will march forward only by calling advanceTimeAndRun() or advanceTimeWait().
 SimulatedTimeSystemHelper::SimulatedTimeSystemHelper()
     : monotonic_time_(MonotonicTime(std::chrono::seconds(0))),
-      system_time_(real_time_source_.systemTime()), pending_updates_(0) {
+      system_time_(real_time_source_.systemTime()) {
   ++instance_count;
   ASSERT(instance_count <= 1);
 }

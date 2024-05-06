@@ -4,7 +4,7 @@
 #include "envoy/registry/registry.h"
 #include "envoy/server/filter_config.h"
 
-#include "extensions/filters/http/common/pass_through_filter.h"
+#include "source/extensions/filters/http/common/pass_through_filter.h"
 
 #include "test/extensions/filters/http/common/empty_http_filter_config.h"
 
@@ -44,11 +44,11 @@ public:
   bool dual_reply_{};
 };
 
-class OnLocalReplyFilterConfig : public Extensions::HttpFilters::Common::EmptyHttpFilterConfig {
+class OnLocalReplyFilterConfig : public Extensions::HttpFilters::Common::EmptyHttpDualFilterConfig {
 public:
-  OnLocalReplyFilterConfig() : EmptyHttpFilterConfig("on-local-reply-filter") {}
-  Http::FilterFactoryCb createFilter(const std::string&,
-                                     Server::Configuration::FactoryContext&) override {
+  OnLocalReplyFilterConfig() : EmptyHttpDualFilterConfig("on-local-reply-filter") {}
+  absl::StatusOr<Http::FilterFactoryCb>
+  createDualFilter(const std::string&, Server::Configuration::ServerFactoryContext&) override {
     return [](Http::FilterChainFactoryCallbacks& callbacks) -> void {
       callbacks.addStreamFilter(std::make_shared<::Envoy::OnLocalReplyFilter>());
     };
@@ -59,4 +59,8 @@ public:
 static Registry::RegisterFactory<OnLocalReplyFilterConfig,
                                  Server::Configuration::NamedHttpFilterConfigFactory>
     register_;
+static Registry::RegisterFactory<OnLocalReplyFilterConfig,
+                                 Server::Configuration::UpstreamHttpFilterConfigFactory>
+    register_upstream_;
+
 } // namespace Envoy

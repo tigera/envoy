@@ -17,8 +17,8 @@ bool ClusterSlot::operator==(const Envoy::Extensions::Clusters::Redis::ClusterSl
 }
 
 // RedisClusterLoadBalancerFactory
-bool RedisClusterLoadBalancerFactory::onClusterSlotUpdate(ClusterSlotsPtr&& slots,
-                                                          Envoy::Upstream::HostMap all_hosts) {
+bool RedisClusterLoadBalancerFactory::onClusterSlotUpdate(ClusterSlotsSharedPtr&& slots,
+                                                          Envoy::Upstream::HostMap& all_hosts) {
   // The slots is sorted, allowing for a quick comparison to make sure we need to update the slot
   // array sort based on start and end to enable efficient comparison
   std::sort(
@@ -99,7 +99,7 @@ void RedisClusterLoadBalancerFactory::onHostHealthUpdate() {
   }
 }
 
-Upstream::LoadBalancerPtr RedisClusterLoadBalancerFactory::create() {
+Upstream::LoadBalancerPtr RedisClusterLoadBalancerFactory::create(Upstream::LoadBalancerParams) {
   absl::ReaderMutexLock lock(&mutex_);
   return std::make_unique<RedisClusterLoadBalancer>(slot_array_, shard_vector_, random_);
 }
@@ -147,7 +147,7 @@ Upstream::HostConstSharedPtr RedisClusterLoadBalancerFactory::RedisClusterLoadBa
     case NetworkFilters::Common::Redis::Client::ReadPolicy::Primary:
       return shard->primary();
     case NetworkFilters::Common::Redis::Client::ReadPolicy::PreferPrimary:
-      if (shard->primary()->health() == Upstream::Host::Health::Healthy) {
+      if (shard->primary()->coarseHealth() == Upstream::Host::Health::Healthy) {
         return shard->primary();
       } else {
         return chooseRandomHost(shard->allHosts(), random_);

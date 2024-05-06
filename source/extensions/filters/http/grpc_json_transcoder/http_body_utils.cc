@@ -1,10 +1,9 @@
-#include "extensions/filters/http/grpc_json_transcoder/http_body_utils.h"
+#include "source/extensions/filters/http/grpc_json_transcoder/http_body_utils.h"
 
 #include "google/api/httpbody.pb.h"
 
 using Envoy::Protobuf::io::CodedInputStream;
 using Envoy::Protobuf::io::CodedOutputStream;
-using Envoy::Protobuf::io::StringOutputStream;
 using Envoy::Protobuf::io::ZeroCopyInputStream;
 
 namespace Envoy {

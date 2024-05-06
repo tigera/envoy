@@ -5,10 +5,9 @@
 #include "envoy/config/trace/v3/skywalking.pb.h"
 #include "envoy/grpc/async_client_manager.h"
 
-#include "common/common/backoff_strategy.h"
-#include "common/grpc/async_client_impl.h"
-
-#include "extensions/tracers/skywalking/skywalking_stats.h"
+#include "source/common/common/backoff_strategy.h"
+#include "source/common/grpc/async_client_impl.h"
+#include "source/extensions/tracers/skywalking/skywalking_stats.h"
 
 #include "cpp2sky/tracing_context.h"
 
@@ -24,7 +23,7 @@ class TraceSegmentReporter : public Logger::Loggable<Logger::Id::tracing>,
 public:
   explicit TraceSegmentReporter(Grpc::AsyncClientFactoryPtr&& factory,
                                 Event::Dispatcher& dispatcher, Random::RandomGenerator& random,
-                                SkyWalkingTracerStats& stats, uint32_t delayed_buffer_size,
+                                SkyWalkingTracerStatsSharedPtr stats, uint32_t delayed_buffer_size,
                                 const std::string& token);
   ~TraceSegmentReporter() override;
 
@@ -47,7 +46,7 @@ private:
   void handleFailure();
   void setRetryTimer();
 
-  SkyWalkingTracerStats& tracing_stats_;
+  SkyWalkingTracerStatsSharedPtr tracing_stats_;
   Grpc::AsyncClient<skywalking::v3::SegmentObject, skywalking::v3::Commands> client_;
   Grpc::AsyncStream<skywalking::v3::SegmentObject> stream_{};
   const Protobuf::MethodDescriptor& service_method_;

@@ -9,7 +9,7 @@
 #include "envoy/http/filter.h"
 #include "envoy/server/filter_config.h"
 
-#include "common/http/header_utility.h"
+#include "source/common/http/header_utility.h"
 
 namespace Envoy {
 namespace Extensions {
@@ -60,7 +60,7 @@ using HeaderDataVectorSharedPtr = std::shared_ptr<std::vector<Http::HeaderUtilit
  */
 class HealthCheckFilter : public Http::StreamFilter {
 public:
-  HealthCheckFilter(Server::Configuration::FactoryContext& context, bool pass_through_mode,
+  HealthCheckFilter(Server::Configuration::ServerFactoryContext& context, bool pass_through_mode,
                     HealthCheckCacheManagerSharedPtr cache_manager,
                     HeaderDataVectorSharedPtr header_match_data,
                     ClusterMinHealthyPercentagesConstSharedPtr cluster_min_healthy_percentages)
@@ -81,8 +81,8 @@ public:
   }
 
   // Http::StreamEncoderFilter
-  Http::FilterHeadersStatus encode100ContinueHeaders(Http::ResponseHeaderMap&) override {
-    return Http::FilterHeadersStatus::Continue;
+  Http::Filter1xxHeadersStatus encode1xxHeaders(Http::ResponseHeaderMap&) override {
+    return Http::Filter1xxHeadersStatus::Continue;
   }
   Http::FilterHeadersStatus encodeHeaders(Http::ResponseHeaderMap& headers,
                                           bool end_stream) override;
@@ -100,7 +100,7 @@ public:
 private:
   void onComplete();
 
-  Server::Configuration::FactoryContext& context_;
+  Server::Configuration::ServerFactoryContext& context_;
   Http::StreamDecoderFilterCallbacks* callbacks_{};
   bool handling_{};
   bool health_check_request_{};

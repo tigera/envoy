@@ -31,13 +31,14 @@ static_resources:
                 server_uri:
                   uri: ext_authz
                   cluster: ext_authz-http-service
-                  timeout:  0.250s
+                  timeout: 0.250s
                 authorization_response:
                   allowed_upstream_headers:
                     patterns:
                     - exact: x-current-user
           - name: envoy.filters.http.router
-            typed_config: {}
+            typed_config:
+              "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
 
   clusters:
   - name: upstream-service

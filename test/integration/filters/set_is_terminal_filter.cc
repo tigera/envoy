@@ -3,8 +3,8 @@
 #include "envoy/http/filter.h"
 #include "envoy/registry/registry.h"
 
-#include "extensions/filters/http/common/factory_base.h"
-#include "extensions/filters/http/common/pass_through_filter.h"
+#include "source/extensions/filters/http/common/factory_base.h"
+#include "source/extensions/filters/http/common/pass_through_filter.h"
 
 #include "test/integration/filters/set_is_terminal_filter_config.pb.h"
 #include "test/integration/filters/set_is_terminal_filter_config.pb.validate.h"
@@ -33,7 +33,7 @@ private:
   }
   bool isTerminalFilterByProtoTyped(
       const test::integration::filters::SetIsTerminalFilterConfig& proto_config,
-      Server::Configuration::FactoryContext&) override {
+      Server::Configuration::ServerFactoryContext&) override {
     return proto_config.is_terminal_filter();
   }
 };

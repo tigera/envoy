@@ -21,7 +21,8 @@ envoy_extension_cc_test(
     data = envoy_select_wasm_cpp_tests([
         "//test/extensions/stats_sinks/wasm/test_data:test_context_cpp.wasm",
     ]),
-    extension_name = "envoy.stat_sinks.wasm",
+    extension_names = ["envoy.stat_sinks.wasm"],
+    tags = ["skip_on_windows"],
     deps = [
         "//source/extensions/stat_sinks/wasm:config",
         "//test/extensions/common/wasm:wasm_runtime",
@@ -37,11 +38,13 @@ envoy_extension_cc_test(
     data = envoy_select_wasm_cpp_tests([
         "//test/extensions/stats_sinks/wasm/test_data:test_context_cpp.wasm",
     ]),
-    extension_name = "envoy.stat_sinks.wasm",
+    extension_names = ["envoy.stat_sinks.wasm"],
     external_deps = ["abseil_optional"],
+    tags = ["skip_on_windows"],
     deps = [
         "//source/common/stats:stats_lib",
         "//source/extensions/common/wasm:wasm_lib",
+        "//source/extensions/wasm_runtime/null:config",
         "//test/extensions/common/wasm:wasm_runtime",
         "//test/extensions/stats_sinks/wasm/test_data:test_context_cpp_plugin",
         "//test/mocks/stats:stats_mocks",

@@ -1,4 +1,4 @@
-#include "extensions/matching/common_inputs/environment_variable/input.h"
+#include "source/extensions/matching/common_inputs/environment_variable/input.h"
 
 #include "gtest/gtest.h"
 
@@ -11,13 +11,11 @@ namespace EnvironmentVariable {
 TEST(InputTest, BasicUsage) {
   {
     Input input("foo");
-    ASSERT_TRUE(input.get().has_value());
-    EXPECT_EQ(input.get().value(), "foo");
+    EXPECT_EQ(absl::get<std::string>(input.get()), "foo");
   }
 
   Input input("foo");
-  ASSERT_TRUE(input.get().has_value());
-  EXPECT_EQ(input.get().value(), "foo");
+  EXPECT_EQ(absl::get<std::string>(input.get()), "foo");
 }
 } // namespace EnvironmentVariable
 } // namespace CommonInputs

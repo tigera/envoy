@@ -187,7 +187,7 @@ A brief outline of the life cycle of a request and response using the example co
 5. The HTTP/2 codec in :ref:`HTTP connection manager <arch_overview_http_conn_man>` deframes and
    demultiplexes the decrypted data stream from the TLS connection to a number of independent
    streams. Each stream handles a single request and response.
-6. For each HTTP stream, an :ref:`HTTP filter <arch_overview_http_filters>` chain is created and
+6. For each HTTP stream, an :ref:`Downstream HTTP filter <arch_overview_http_filters>` chain is created and
    runs. The request first passes through CustomFilter which may read and modify the request. The
    most important HTTP filter is the router filter which sits at the end of the HTTP filter chain.
    When ``decodeHeaders`` is invoked on the router filter, the route is selected and a cluster is
@@ -198,15 +198,21 @@ A brief outline of the life cycle of a request and response using the example co
    endpoint. The cluster’s circuit breakers are checked to determine if a new stream is allowed. A
    new connection to the endpoint is created if the endpoint's connection pool is empty or lacks
    capacity.
-8. The upstream endpoint connection's HTTP/2 codec multiplexes and frames the request’s stream with
+8. For each stream an :ref:`Upstream HTTP filter <arch_overview_http_filters>` chain is created and
+   runs. By default this only includes the CodecFilter, sending data to the appropriate codec, but if
+   the cluster is configured with an upstream HTTP filter chain, that filter chain will be created and run
+   on each stream, which includes creating and running separate filter chains for retries and shadowed
+   requests.
+9. The upstream endpoint connection's HTTP/2 codec multiplexes and frames the request’s stream with
    any other streams going to that upstream over a single TCP connection.
-9. The upstream endpoint connection's TLS transport socket encrypts these bytes and writes them to a
-   TCP socket for the upstream connection.
-10. The request, consisting of headers, and optional body and trailers, is proxied upstream, and the
+10. The upstream endpoint connection's TLS transport socket encrypts these bytes and writes them to a
+    TCP socket for the upstream connection.
+11. The request, consisting of headers, and optional body and trailers, is proxied upstream, and the
     response is proxied downstream. The response passes through the HTTP filters in the
     :ref:`opposite order <arch_overview_http_filters_ordering>` from the request, starting at the
-    router filter and passing through CustomFilter, before being sent downstream.
-11. When the response is complete, the stream is destroyed. Post-request processing will update
+    codec filter, traversing any upstream HTTP filters, then going through the router filter and passing
+    through CustomFilter, before being sent downstream.
+12. When the response is complete, the stream is destroyed. Post-request processing will update
     stats, write to the access log and finalize trace spans.
 
 We elaborate on each of these steps in the sections below.
@@ -254,7 +260,7 @@ chain.
    :width: 80%
    :align: center
 
-The TLS inspector filter implements the :repo:`ListenerFilter <include/envoy/network/filter.h>`
+The TLS inspector filter implements the :repo:`ListenerFilter <envoy/network/filter.h>`
 interface. All filter interfaces, whether listener or network/HTTP, require that filters implement
 callbacks for specific connection or stream events. In the case of ``ListenerFilter``, this is:
 
@@ -281,7 +287,7 @@ connection.
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 Envoy offers pluggable transport sockets via the
-:repo:`TransportSocket <include/envoy/network/transport_socket.h>`
+:repo:`TransportSocket <envoy/network/transport_socket.h>`
 extension interface. Transport sockets follow the lifecycle events of a TCP connection and
 read/write into network buffers. Some key methods that transport sockets must implement are:
 
@@ -323,11 +329,11 @@ lifecycle events and are invoked as data becomes available from the transport so
 Network filters are composed as a pipeline, unlike transport sockets which are one-per-connection.
 Network filters come in three varieties:
 
-* :repo:`ReadFilter <include/envoy/network/filter.h>` implementing ``onData()``, called when data is
+* :repo:`ReadFilter <envoy/network/filter.h>` implementing ``onData()``, called when data is
   available from the connection (due to some request).
-* :repo:`WriteFilter <include/envoy/network/filter.h>` implementing ``onWrite()``, called when data
+* :repo:`WriteFilter <envoy/network/filter.h>` implementing ``onWrite()``, called when data
   is about to be written to the connection (due to some response).
-* :repo:`Filter <include/envoy/network/filter.h>` implementing both *ReadFilter* and *WriteFilter*.
+* :repo:`Filter <envoy/network/filter.h>` implementing both *ReadFilter* and *WriteFilter*.
 
 The method signatures for the key filter methods are:
 
@@ -379,7 +385,7 @@ protocol is HTTP/1, HTTP/2 or HTTP/3.
 6. HTTP filter chain processing
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-For each HTTP stream, the HCM instantiates an :ref:`HTTP filter <arch_overview_http_filters>` chain,
+For each HTTP stream, the HCM instantiates an :ref:`Downstream HTTP filter <arch_overview_http_filters>` chain,
 following the pattern established above for listener and network filter chains.
 
 .. image:: /_static/lor-http-filters.svg
@@ -388,9 +394,9 @@ following the pattern established above for listener and network filter chains.
 
 There are three kinds of HTTP filter interfaces:
 
-* :repo:`StreamDecoderFilter <include/envoy/http/filter.h>` with callbacks for request processing.
-* :repo:`StreamEncoderFilter <include/envoy/http/filter.h>` with callbacks for response processing.
-* :repo:`StreamFilter <include/envoy/http/filter.h>` implementing both ``StreamDecoderFilter`` and
+* :repo:`StreamDecoderFilter <envoy/http/filter.h>` with callbacks for request processing.
+* :repo:`StreamEncoderFilter <envoy/http/filter.h>` with callbacks for response processing.
+* :repo:`StreamFilter <envoy/http/filter.h>` implementing both ``StreamDecoderFilter`` and
   ``StreamEncoderFilter``.
 
 Looking at the decoder filter interface:
@@ -448,11 +454,20 @@ discussed in the next section.
 The resulting HTTP connection pool is used to build an ``UpstreamRequest`` object in the router, which
 encapsulates the HTTP encoding and decoding callback methods for the upstream HTTP request. Once a
 stream is allocated on a connection in the HTTP connection pool, the request headers are forwarded
-to the upstream endpoint by the invocation of ``UpstreamRequest::encoderHeaders()``.
+to the upstream endpoint by the invocation of ``UpstreamRequest::encodeHeaders``.
 
 The router filter is responsible for all aspects of upstream request lifecycle management on the
 stream allocated from the HTTP connection pool. It also is responsible for request timeouts, retries
 and affinity.
+
+The router filter is also responsible for the creation and running of the `Upstream HTTP filter <arch_overview_http_filters>`
+chain. By default, upstream HTTP filters will start running immediately after headers arrive at the router
+filter, however C++ filters can pause until the upstream connection is established if they need to
+inspect the upstream stream or connection. Upstream HTTP filter chains are by default configured via cluster
+configuration, so for example a shadowed request can have a separate upstream HTTP filter chain for the primary
+and shadowed clusters. Also as the upstream HTTP filter chain is upstream of the router filter, it is run per each
+retry attempt allowing header manipulation per retry and including information about the upstream stream and
+connection. Unlike downstream HTTP filters, upstream HTTP filters can not alter the route.
 
 7. Load balancing
 ^^^^^^^^^^^^^^^^^
@@ -470,8 +485,8 @@ connections are at their maximum concurrent stream limit, a new connection is es
 in the connection pool, unless the circuit breaker for maximum connections for the cluster has
 tripped. If a maximum lifetime stream limit for a connection is configured and reached, a new
 connection is allocated in the pool and the affected HTTP/2 connection is drained. Other circuit
-breakers, e.g. maximum concurrent requests to a cluster are also checked. See :repo:`circuit
-breakers <arch_overview_circuit_breakers>` and :ref:`connection pools <arch_overview_conn_pool>` for
+breakers, e.g. maximum concurrent requests to a cluster are also checked. See :ref:`circuit
+breakers <arch_overview_circuit_break>` and :ref:`connection pools <arch_overview_conn_pool>` for
 further details.
 
 .. image:: /_static/lor-lb.svg

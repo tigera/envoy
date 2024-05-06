@@ -6,12 +6,14 @@
 #include "envoy/extensions/filters/network/http_connection_manager/v3/http_connection_manager.pb.h"
 #include "envoy/service/discovery/v3/discovery.pb.h"
 
-#include "common/config/api_version.h"
-#include "common/config/metadata.h"
-#include "common/http/exception.h"
-#include "common/protobuf/protobuf.h"
+#include "source/common/config/api_version.h"
+#include "source/common/config/metadata.h"
+#include "source/common/http/exception.h"
+#include "source/common/protobuf/protobuf.h"
 
+#include "test/config/v2_link_hacks.h"
 #include "test/integration/http_integration.h"
+#include "test/integration/http_protocol_integration.h"
 #include "test/test_common/network_utility.h"
 #include "test/test_common/resources.h"
 #include "test/test_common/utility.h"
@@ -22,18 +24,19 @@ namespace Envoy {
 namespace {
 
 std::string ipSuppressEnvoyHeadersTestParamsToString(
-    const ::testing::TestParamInfo<std::tuple<Network::Address::IpVersion, bool>>& params) {
+    const ::testing::TestParamInfo<std::tuple<Network::Address::IpVersion, bool, bool>>& params) {
   return fmt::format(
-      "{}_{}",
+      "{}_{}_{}",
       TestUtility::ipTestParamsToString(
           ::testing::TestParamInfo<Network::Address::IpVersion>(std::get<0>(params.param), 0)),
-      std::get<1>(params.param) ? "with_x_envoy_from_router" : "without_x_envoy_from_router");
+      std::get<1>(params.param) ? "with_x_envoy_from_router" : "without_x_envoy_from_router",
+      std::get<2>(params.param) ? "with_UHV" : "without_UHV");
 }
 
 void disableHeaderValueOptionAppend(
     Protobuf::RepeatedPtrField<envoy::config::core::v3::HeaderValueOption>& header_value_options) {
   for (auto& i : header_value_options) {
-    i.mutable_append()->set_value(false);
+    i.set_append_action(envoy::config::core::v3::HeaderValueOption::OVERWRITE_IF_EXISTS_OR_ADD);
   }
 }
 
@@ -42,11 +45,7 @@ http_filters:
   - name: envoy.filters.http.router
 codec_type: HTTP1
 use_remote_address: false
-original_ip_detection_extensions:
-- name: envoy.http.original_ip_detection.xff
-  typed_config:
-    "@type": type.googleapis.com/envoy.extensions.http.original_ip_detection.xff.v3.XffConfig
-    xff_num_trusted_hops: 1
+xff_num_trusted_hops: 1
 stat_prefix: header_test
 route_config:
   virtual_hosts:
@@ -122,6 +121,9 @@ route_config:
             - header:
                 key: "x-route-response"
                 value: "route"
+            - header:
+                key: "details"
+                value: "%RESPONSE_CODE_DETAILS%"
           response_headers_to_remove: ["x-route-response-remove"]
           route:
             cluster: cluster_0
@@ -177,7 +179,7 @@ route_config:
 } // namespace
 
 class HeaderIntegrationTest
-    : public testing::TestWithParam<std::tuple<Network::Address::IpVersion, bool>>,
+    : public testing::TestWithParam<std::tuple<Network::Address::IpVersion, bool, bool>>,
       public HttpIntegrationTest {
 public:
   HeaderIntegrationTest() : HttpIntegrationTest(Http::CodecType::HTTP1, std::get<0>(GetParam())) {}
@@ -205,7 +207,9 @@ public:
     auto* mutable_header = header_value_option->mutable_header();
     mutable_header->set_key(key);
     mutable_header->set_value(value);
-    header_value_option->mutable_append()->set_value(append);
+    header_value_option->set_append_action(
+        append ? envoy::config::core::v3::HeaderValueOption::APPEND_IF_EXISTS_OR_ADD
+               : envoy::config::core::v3::HeaderValueOption::OVERWRITE_IF_EXISTS_OR_ADD);
   }
 
   void prepareEDS() {
@@ -419,6 +423,9 @@ public:
       };
     }
 
+    config_helper_.addRuntimeOverride("envoy.reloadable_features.enable_universal_header_validator",
+                                      std::get<2>(GetParam()) ? "true" : "false");
+
     HttpIntegrationTest::initialize();
   }
 
@@ -461,11 +468,90 @@ protected:
   FakeStreamPtr eds_stream_;
 };
 
+#ifdef ENVOY_ENABLE_UHV
 INSTANTIATE_TEST_SUITE_P(
     IpVersionsSuppressEnvoyHeaders, HeaderIntegrationTest,
-    testing::Combine(testing::ValuesIn(TestEnvironment::getIpVersionsForTest()), testing::Bool()),
+    testing::Combine(testing::ValuesIn(TestEnvironment::getIpVersionsForTest()), testing::Bool(),
+                     testing::Values(true)),
     ipSuppressEnvoyHeadersTestParamsToString);
+#else
+INSTANTIATE_TEST_SUITE_P(
+    IpVersionsSuppressEnvoyHeaders, HeaderIntegrationTest,
+    testing::Combine(testing::ValuesIn(TestEnvironment::getIpVersionsForTest()), testing::Bool(),
+                     testing::Values(false)),
+    ipSuppressEnvoyHeadersTestParamsToString);
+#endif
 
+TEST_P(HeaderIntegrationTest, WeightedClusterWithClusterHeader) {
+  config_helper_.addConfigModifier(
+      [&](envoy::extensions::filters::network::http_connection_manager::v3::HttpConnectionManager&
+              hcm) {
+        // Overwrite default config with our own.
+        TestUtility::loadFromYaml(R"EOF(
+http_filters:
+  - name: envoy.filters.http.router
+codec_type: HTTP1
+use_remote_address: false
+xff_num_trusted_hops: 1
+stat_prefix: header_test
+route_config:
+  name: route-config-1
+  virtual_hosts:
+    - name: vhost-headers
+      domains: ["vhost-headers.com"]
+      routes:
+        - match: { prefix: "/vhost-route-and-weighted-clusters" }
+          name: route-0
+          route:
+            weighted_clusters:
+              clusters:
+                - cluster_header: x-route-to-this-cluster
+                  weight: 100
+                  request_headers_to_add:
+                    - header:
+                        key: "x-weighted-cluster-request"
+                        value: "weighted-cluster-1"
+                  request_headers_to_remove: ["x-weighted-cluster-request-remove"]
+                  response_headers_to_add:
+                    - header:
+                        key: "x-weighted-cluster-response"
+                        value: "weighted-cluster-1"
+                  response_headers_to_remove: ["x-weighted-cluster-response-remove"]
+)EOF",
+                                  hcm);
+        envoy::extensions::filters::http::router::v3::Router router_config;
+        router_config.set_suppress_envoy_headers(routerSuppressEnvoyHeaders());
+        hcm.mutable_http_filters(0)->mutable_typed_config()->PackFrom(router_config);
+      });
+  initialize();
+  performRequest(
+      Http::TestRequestHeaderMapImpl{
+          {":method", "GET"},
+          {":path", "/vhost-route-and-weighted-clusters"},
+          {":scheme", "http"},
+          {":authority", "vhost-headers.com"},
+          {"x-weighted-cluster-request-remove", "to-remove"},
+          {"x-route-to-this-cluster", "cluster_0"},
+      },
+      Http::TestRequestHeaderMapImpl{
+          {":authority", "vhost-headers.com"},
+          {"x-route-to-this-cluster", "cluster_0"},
+          {":path", "/vhost-route-and-weighted-clusters"},
+          {":method", "GET"},
+          {"x-weighted-cluster-request", "weighted-cluster-1"},
+      },
+      Http::TestResponseHeaderMapImpl{
+          {"server", "envoy"},
+          {"content-length", "0"},
+          {":status", "200"},
+          {"x-weighted-cluster-response-remove", "to-remove"},
+      },
+      Http::TestResponseHeaderMapImpl{
+          {"server", "envoy"},
+          {":status", "200"},
+          {"x-weighted-cluster-response", "weighted-cluster-1"},
+      });
+}
 // Validate that downstream request headers are passed upstream and upstream response headers are
 // passed downstream.
 TEST_P(HeaderIntegrationTest, TestRequestAndResponseHeaderPassThrough) {
@@ -596,6 +682,7 @@ TEST_P(HeaderIntegrationTest, TestRouteAppendHeaderManipulation) {
           {"server", "envoy"},
           {"x-route-response", "upstream"},
           {"x-route-response", "route"},
+          {"details", "via_upstream"},
           {":status", "200"},
       });
 }
@@ -632,6 +719,7 @@ TEST_P(HeaderIntegrationTest, TestRouteReplaceHeaderManipulation) {
           {"server", "envoy"},
           {"x-unmodified", "upstream"},
           {"x-route-response", "route"},
+          {"details", "via_upstream"},
           {":status", "200"},
       });
 }
@@ -1102,12 +1190,12 @@ TEST_P(HeaderIntegrationTest, PathWithEscapedSlashesByDefaultUnchanghed) {
   performRequest(
       Http::TestRequestHeaderMapImpl{
           {":method", "GET"},
-          {":path", "/private/..%2Fpublic%5c"},
+          {":path", "/private/..%2Fpublic%5C"},
           {":scheme", "http"},
           {":authority", "path-sanitization.com"},
       },
       Http::TestRequestHeaderMapImpl{{":authority", "path-sanitization.com"},
-                                     {":path", "/private/..%2Fpublic%5c"},
+                                     {":path", "/private/..%2Fpublic%5C"},
                                      {":method", "GET"},
                                      {"x-site", "private"}},
       Http::TestResponseHeaderMapImpl{
@@ -1180,12 +1268,12 @@ TEST_P(HeaderIntegrationTest, PathWithEscapedSlashesUnmodified) {
   performRequest(
       Http::TestRequestHeaderMapImpl{
           {":method", "GET"},
-          {":path", "/private/..%2Fpublic%5c"},
+          {":path", "/private/..%2Fpublic%5C"},
           {":scheme", "http"},
           {":authority", "path-sanitization.com"},
       },
       Http::TestRequestHeaderMapImpl{{":authority", "path-sanitization.com"},
-                                     {":path", "/private/..%2Fpublic%5c"},
+                                     {":path", "/private/..%2Fpublic%5C"},
                                      {":method", "GET"},
                                      {"x-site", "private"}},
       Http::TestResponseHeaderMapImpl{
@@ -1253,8 +1341,9 @@ TEST_P(HeaderIntegrationTest, PathWithEscapedSlashesRedirected) {
                                    });
 }
 
-// Validates TE header is forwarded if it contains a supported value
+// Validates legacy TE handling: TE header is forwarded if it contains a supported value
 TEST_P(HeaderIntegrationTest, TestTeHeaderPassthrough) {
+  config_helper_.addRuntimeOverride("envoy.reloadable_features.sanitize_te", "false");
   initializeFilter(HeaderMode::Append, false);
   performRequest(
       Http::TestRequestHeaderMapImpl{
@@ -1287,8 +1376,9 @@ TEST_P(HeaderIntegrationTest, TestTeHeaderPassthrough) {
       });
 }
 
-// Validates TE header is stripped if it contains an unsupported value
+// Validates legacy TE handling: that TE header stripped if it contains an unsupported value.
 TEST_P(HeaderIntegrationTest, TestTeHeaderSanitized) {
+  config_helper_.addRuntimeOverride("envoy.reloadable_features.sanitize_te", "false");
   initializeFilter(HeaderMode::Append, false);
   performRequest(
       Http::TestRequestHeaderMapImpl{
@@ -1321,5 +1411,54 @@ TEST_P(HeaderIntegrationTest, TestTeHeaderSanitized) {
           {":status", "200"},
           {"connection", "close"},
       });
+}
+
+using EmptyHeaderIntegrationTest = HttpProtocolIntegrationTest;
+using HeaderValueOption = envoy::config::core::v3::HeaderValueOption;
+
+INSTANTIATE_TEST_SUITE_P(Protocols, EmptyHeaderIntegrationTest,
+                         testing::ValuesIn(HttpProtocolIntegrationTest::getProtocolTestParams()),
+                         HttpProtocolIntegrationTest::protocolTestParamsToString);
+
+TEST_P(EmptyHeaderIntegrationTest, AllProtocolsPassEmptyHeaders) {
+  auto vhost = config_helper_.createVirtualHost("sni.lyft.com");
+  *vhost.add_request_headers_to_add() = TestUtility::parseYaml<HeaderValueOption>(R"EOF(
+    header:
+      key: "x-ds-add-empty"
+      value: "%PER_REQUEST_STATE(does.not.exist)%"
+    keep_empty_value: true
+  )EOF");
+  *vhost.add_request_headers_to_add() = TestUtility::parseYaml<HeaderValueOption>(R"EOF(
+    header:
+      key: "x-ds-no-add-empty"
+      value: "%PER_REQUEST_STATE(does.not.exist)%"
+  )EOF");
+  *vhost.add_response_headers_to_add() = TestUtility::parseYaml<HeaderValueOption>(R"EOF(
+    header:
+      key: "x-us-add-empty"
+      value: "%PER_REQUEST_STATE(does.not.exist)%"
+    keep_empty_value: true
+  )EOF");
+  *vhost.add_response_headers_to_add() = TestUtility::parseYaml<HeaderValueOption>(R"EOF(
+    header:
+      key: "x-us-no-add-empty"
+      value: "%PER_REQUEST_STATE(does.not.exist)%"
+  )EOF");
+
+  config_helper_.addVirtualHost(vhost);
+
+  initialize();
+  codec_client_ = makeHttpConnection(lookupPort("http"));
+  auto response = sendRequestAndWaitForResponse(
+      Http::TestRequestHeaderMapImpl{
+          {":method", "GET"}, {":path", "/"}, {":scheme", "http"}, {":authority", "sni.lyft.com"}},
+      0,
+      Http::TestResponseHeaderMapImpl{
+          {"server", "envoy"}, {"content-length", "0"}, {":status", "200"}},
+      0);
+  EXPECT_EQ(upstream_request_->headers().get(Http::LowerCaseString("x-ds-add-empty")).size(), 1);
+  EXPECT_TRUE(upstream_request_->headers().get(Http::LowerCaseString("x-ds-no-add-empty")).empty());
+  EXPECT_EQ(response->headers().get(Http::LowerCaseString("x-us-add-empty")).size(), 1);
+  EXPECT_TRUE(response->headers().get(Http::LowerCaseString("x-us-no-add-empty")).empty());
 }
 } // namespace Envoy

@@ -1,4 +1,4 @@
-#include "extensions/grpc_credentials/file_based_metadata/config.h"
+#include "source/extensions/grpc_credentials/file_based_metadata/config.h"
 
 #include "envoy/config/core/v3/grpc_service.pb.h"
 #include "envoy/config/grpc_credential/v3/file_based_metadata.pb.h"
@@ -6,11 +6,11 @@
 #include "envoy/grpc/google_grpc_creds.h"
 #include "envoy/registry/registry.h"
 
-#include "common/config/datasource.h"
-#include "common/config/utility.h"
-#include "common/grpc/google_grpc_creds_impl.h"
-#include "common/protobuf/message_validator_impl.h"
-#include "common/protobuf/utility.h"
+#include "source/common/config/datasource.h"
+#include "source/common/config/utility.h"
+#include "source/common/grpc/google_grpc_creds_impl.h"
+#include "source/common/protobuf/message_validator_impl.h"
+#include "source/common/protobuf/utility.h"
 
 namespace Envoy {
 namespace Extensions {
@@ -69,13 +69,15 @@ FileBasedMetadataAuthenticator::GetMetadata(grpc::string_ref, grpc::string_ref,
   if (!config_.header_key().empty()) {
     header_key = config_.header_key();
   }
-  TRY_ASSERT_MAIN_THREAD {
+  // TODO(#14320): avoid using an exception here or find some way of doing this
+  // in the main thread.
+  TRY_NEEDS_AUDIT {
     std::string header_value = Envoy::Config::DataSource::read(config_.secret_data(), true, api_);
     metadata->insert(std::make_pair(header_key, header_prefix + header_value));
   }
   END_TRY
   catch (const EnvoyException& e) {
-    return grpc::Status(grpc::StatusCode::NOT_FOUND, e.what());
+    return {grpc::StatusCode::NOT_FOUND, e.what()};
   }
   return grpc::Status::OK;
 }

@@ -45,6 +45,7 @@ The following sandboxes are available:
 .. toctree::
     :maxdepth: 1
 
+    brotli
     cache
     cors
     csrf
@@ -54,19 +55,32 @@ The following sandboxes are available:
     ext_authz
     fault_injection
     front_proxy
+    golang-http
+    golang-network
     grpc_bridge
+    gzip
     jaeger_native_tracing
     jaeger_tracing
+    kafka
     load_reporting_service
+    locality_load_balancing
+    local_ratelimit
+    lua-cluster-specifier
     lua
     mysql
+    opentelemetry
     postgres
+    rbac
     redis
-    skywalking_tracing
+    route-mirror
+    single-page-app
+    skywalking
     tls-inspector
     tls-sni
     tls
     udp
     wasm-cc
     websocket
-    zipkin_tracing
+    win32_front_proxy
+    zipkin
+    zstd

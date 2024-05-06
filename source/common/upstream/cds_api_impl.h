@@ -12,9 +12,9 @@
 #include "envoy/stats/scope.h"
 #include "envoy/upstream/cluster_manager.h"
 
-#include "common/config/subscription_base.h"
-#include "common/protobuf/protobuf.h"
-#include "common/upstream/cds_api_helper.h"
+#include "source/common/config/subscription_base.h"
+#include "source/common/protobuf/protobuf.h"
+#include "source/common/upstream/cds_api_helper.h"
 
 namespace Envoy {
 namespace Upstream {
@@ -39,11 +39,11 @@ public:
 
 private:
   // Config::SubscriptionCallbacks
-  void onConfigUpdate(const std::vector<Config::DecodedResourceRef>& resources,
-                      const std::string& version_info) override;
-  void onConfigUpdate(const std::vector<Config::DecodedResourceRef>& added_resources,
-                      const Protobuf::RepeatedPtrField<std::string>& removed_resources,
-                      const std::string& system_version_info) override;
+  absl::Status onConfigUpdate(const std::vector<Config::DecodedResourceRef>& resources,
+                              const std::string& version_info) override;
+  absl::Status onConfigUpdate(const std::vector<Config::DecodedResourceRef>& added_resources,
+                              const Protobuf::RepeatedPtrField<std::string>& removed_resources,
+                              const std::string& system_version_info) override;
   void onConfigUpdateFailed(Envoy::Config::ConfigUpdateFailureReason reason,
                             const EnvoyException* e) override;
   CdsApiImpl(const envoy::config::core::v3::ConfigSource& cds_config,
@@ -53,7 +53,7 @@ private:
 
   CdsApiHelper helper_;
   ClusterManager& cm_;
-  Stats::ScopePtr scope_;
+  Stats::ScopeSharedPtr scope_;
   Config::SubscriptionPtr subscription_;
   std::function<void()> initialize_callback_;
 };

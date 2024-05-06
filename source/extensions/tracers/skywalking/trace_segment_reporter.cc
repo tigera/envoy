@@ -1,4 +1,4 @@
-#include "extensions/tracers/skywalking/trace_segment_reporter.h"
+#include "source/extensions/tracers/skywalking/trace_segment_reporter.h"
 
 #include "envoy/http/header_map.h"
 
@@ -17,9 +17,9 @@ Http::RegisterCustomInlineHeader<Http::CustomInlineHeaderRegistry::Type::Request
 TraceSegmentReporter::TraceSegmentReporter(Grpc::AsyncClientFactoryPtr&& factory,
                                            Event::Dispatcher& dispatcher,
                                            Random::RandomGenerator& random_generator,
-                                           SkyWalkingTracerStats& stats,
+                                           SkyWalkingTracerStatsSharedPtr stats,
                                            uint32_t delayed_buffer_size, const std::string& token)
-    : tracing_stats_(stats), client_(factory->create()),
+    : tracing_stats_(stats), client_(factory->createUncachedRawAsyncClient()),
       service_method_(*Protobuf::DescriptorPool::generated_pool()->FindMethodByName(
           "skywalking.v3.TraceSegmentReportService.collect")),
       random_generator_(random_generator), token_(token),
@@ -48,14 +48,19 @@ void TraceSegmentReporter::report(TracingContextPtr tracing_context) {
   ENVOY_LOG(trace, "Try to report segment to SkyWalking Server:\n{}", request.DebugString());
 
   if (stream_ != nullptr) {
-    tracing_stats_.segments_sent_.inc();
+    if (stream_->isAboveWriteBufferHighWatermark()) {
+      ENVOY_LOG(debug, "Failed to report segment to SkyWalking Server since buffer is over limit");
+      tracing_stats_->segments_dropped_.inc();
+      return;
+    }
+    tracing_stats_->segments_sent_.inc();
     stream_->sendMessage(request, false);
     return;
   }
   // Null stream_ and cache segment data temporarily.
   delayed_segments_cache_.emplace(request);
   if (delayed_segments_cache_.size() > delayed_buffer_size_) {
-    tracing_stats_.segments_dropped_.inc();
+    tracing_stats_->segments_dropped_.inc();
     delayed_segments_cache_.pop();
   }
 }
@@ -63,12 +68,12 @@ void TraceSegmentReporter::report(TracingContextPtr tracing_context) {
 void TraceSegmentReporter::flushTraceSegments() {
   ENVOY_LOG(debug, "Flush segments in cache to SkyWalking backend service");
   while (!delayed_segments_cache_.empty() && stream_ != nullptr) {
-    tracing_stats_.segments_sent_.inc();
-    tracing_stats_.segments_flushed_.inc();
+    tracing_stats_->segments_sent_.inc();
+    tracing_stats_->segments_flushed_.inc();
     stream_->sendMessage(delayed_segments_cache_.front(), false);
     delayed_segments_cache_.pop();
   }
-  tracing_stats_.cache_flushed_.inc();
+  tracing_stats_->cache_flushed_.inc();
 }
 
 void TraceSegmentReporter::closeStream() {

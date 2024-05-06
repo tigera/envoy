@@ -5,6 +5,7 @@
 #include <string>
 #include <vector>
 
+#include "envoy/config/core/v3/base.pb.h"
 #include "envoy/extensions/filters/http/fault/v3/fault.pb.h"
 #include "envoy/http/filter.h"
 #include "envoy/http/header_map.h"
@@ -13,13 +14,13 @@
 #include "envoy/stats/stats_macros.h"
 #include "envoy/type/v3/percent.pb.h"
 
-#include "common/buffer/watermark_buffer.h"
-#include "common/common/token_bucket_impl.h"
-#include "common/http/header_utility.h"
-#include "common/stats/symbol_table_impl.h"
-
-#include "extensions/filters/common/fault/fault_config.h"
-#include "extensions/filters/http/common/stream_rate_limiter.h"
+#include "source/common/buffer/watermark_buffer.h"
+#include "source/common/common/token_bucket_impl.h"
+#include "source/common/http/header_utility.h"
+#include "source/common/protobuf/protobuf.h"
+#include "source/common/stats/symbol_table.h"
+#include "source/extensions/filters/common/fault/fault_config.h"
+#include "source/extensions/filters/http/common/stream_rate_limiter.h"
 
 namespace Envoy {
 namespace Extensions {
@@ -75,6 +76,7 @@ public:
     return response_rate_limit_percent_runtime_;
   }
   bool disableDownstreamClusterStats() const { return disable_downstream_cluster_stats_; }
+  const Envoy::ProtobufWkt::Struct& filterMetadata() const { return filter_metadata_; }
 
 private:
   class RuntimeKeyValues {
@@ -107,6 +109,8 @@ private:
   const std::string max_active_faults_runtime_;
   const std::string response_rate_limit_percent_runtime_;
   const bool disable_downstream_cluster_stats_;
+
+  const Envoy::ProtobufWkt::Struct filter_metadata_;
 };
 
 /**
@@ -172,8 +176,8 @@ public:
   }
 
   // Http::StreamEncoderFilter
-  Http::FilterHeadersStatus encode100ContinueHeaders(Http::ResponseHeaderMap&) override {
-    return Http::FilterHeadersStatus::Continue;
+  Http::Filter1xxHeadersStatus encode1xxHeaders(Http::ResponseHeaderMap&) override {
+    return Http::Filter1xxHeadersStatus::Continue;
   }
   Http::FilterHeadersStatus encodeHeaders(Http::ResponseHeaderMap&, bool) override {
     return Http::FilterHeadersStatus::Continue;

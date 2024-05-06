@@ -1,3 +1,4 @@
+load("@com_github_rules_proto_grpc//cpp:defs.bzl", "cpp_grpc_library")
 load(
     "//bazel:envoy_build_system.bzl",
     "envoy_cc_extension",
@@ -34,19 +35,15 @@ envoy_cc_extension(
     hdrs = [
         "config.h",
     ],
-    category = (
-        "envoy.transport_sockets.downstream",
-        "envoy.transport_sockets.upstream",
-    ),
     external_deps = [
         "abseil_node_hash_set",
     ],
-    security_posture = "robust_to_untrusted_downstream_and_upstream",
     deps = [
+        ":alts_channel_pool",
         ":tsi_handshaker",
         ":tsi_socket",
-        "//include/envoy/registry",
-        "//include/envoy/server:transport_socket_config_interface",
+        "//envoy/registry",
+        "//envoy/server:transport_socket_config_interface",
         "//source/common/grpc:google_grpc_context_lib",
         "@envoy_api//envoy/extensions/transport_sockets/alts/v3:pkg_cc_proto",
     ],
@@ -75,8 +72,9 @@ envoy_cc_library(
         "tsi_handshaker.h",
     ],
     deps = [
+        ":alts_tsi_handshaker",
         ":grpc_tsi_wrapper",
-        "//include/envoy/event:dispatcher_interface",
+        "//envoy/event:dispatcher_interface",
         "//source/common/buffer:buffer_lib",
     ],
 )
@@ -93,14 +91,15 @@ envoy_cc_library(
         ":noop_transport_socket_callbacks_lib",
         ":tsi_frame_protector",
         ":tsi_handshaker",
-        "//include/envoy/network:io_handle_interface",
-        "//include/envoy/network:transport_socket_interface",
+        "//envoy/network:io_handle_interface",
+        "//envoy/network:transport_socket_interface",
         "//source/common/buffer:buffer_lib",
         "//source/common/buffer:watermark_buffer_lib",
         "//source/common/common:cleanup_lib",
         "//source/common/common:empty_string",
         "//source/common/common:enum_to_int",
         "//source/common/network:raw_buffer_socket_lib",
+        "//source/common/network:transport_socket_options_lib",
         "//source/common/protobuf:utility_lib",
     ],
 )
@@ -109,7 +108,55 @@ envoy_cc_library(
     name = "noop_transport_socket_callbacks_lib",
     hdrs = ["noop_transport_socket_callbacks.h"],
     deps = [
-        "//include/envoy/network:io_handle_interface",
-        "//include/envoy/network:transport_socket_interface",
+        "//envoy/network:io_handle_interface",
+        "//envoy/network:transport_socket_interface",
+    ],
+)
+
+envoy_cc_library(
+    name = "alts_channel_pool",
+    srcs = ["alts_channel_pool.cc"],
+    hdrs = ["alts_channel_pool.h"],
+    external_deps = [
+        "grpc",
+    ],
+    deps = [
+        "@com_google_absl//absl/random",
+    ],
+)
+
+cpp_grpc_library(
+    name = "handshaker_cc_grpc",
+    protos = ["@com_github_grpc_grpc//src/proto/grpc/gcp:alts_handshaker_proto"],
+)
+
+envoy_cc_library(
+    name = "alts_proxy",
+    srcs = ["alts_proxy.cc"],
+    hdrs = ["alts_proxy.h"],
+    external_deps = [
+        "abseil_memory",
+        "abseil_status",
+        "abseil_statusor",
+        "grpc",
+    ],
+    deps = [
+        ":handshaker_cc_grpc",
+    ],
+)
+
+envoy_cc_library(
+    name = "alts_tsi_handshaker",
+    srcs = ["alts_tsi_handshaker.cc"],
+    hdrs = ["alts_tsi_handshaker.h"],
+    external_deps = [
+        "abseil_memory",
+        "abseil_status",
+        "grpc",
+    ],
+    deps = [
+        ":alts_proxy",
+        ":handshaker_cc_grpc",
+        ":tsi_frame_protector",
     ],
 )

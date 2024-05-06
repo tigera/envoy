@@ -1,5 +1,4 @@
 admin:
-  access_log_path: "/dev/null"
   address:
     socket_address:
       address: 0.0.0.0
@@ -11,9 +10,9 @@ static_resources:
         address: 0.0.0.0
         port_value: 10000
     listener_filters:
-      - name: "envoy.filters.listener.tls_inspector"
-        typed_config:
-          "@type": type.googleapis.com/envoy.extensions.filters.listener.tls_inspector.v3.TlsInspector
+    - name: "envoy.filters.listener.tls_inspector"
+      typed_config:
+        "@type": type.googleapis.com/envoy.extensions.filters.listener.tls_inspector.v3.TlsInspector
     filter_chains:
     - filter_chain_match:
         transport_protocol: tls

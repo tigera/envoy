@@ -1,7 +1,7 @@
 #include "envoy/registry/registry.h"
 #include "envoy/server/filter_config.h"
 
-#include "extensions/filters/http/common/pass_through_filter.h"
+#include "source/extensions/filters/http/common/pass_through_filter.h"
 
 #include "test/extensions/filters/http/common/empty_http_filter_config.h"
 #include "test/integration/filters/common.h"
@@ -20,7 +20,7 @@ public:
     Http::MetadataMapPtr metadata_map_ptr = std::make_unique<Http::MetadataMap>(metadata_map);
     decoder_callbacks_->addDecodedMetadata().emplace_back(std::move(metadata_map_ptr));
     decoder_callbacks_->sendLocalReply(Envoy::Http::Code::OK, "", nullptr, absl::nullopt,
-                                       "LocalReplyWithMetadataFilter is ready");
+                                       "local_reply_with_metadata_filter_is_ready");
     return Http::FilterHeadersStatus::StopIteration;
   }
 
@@ -36,5 +36,8 @@ constexpr char LocalReplyWithMetadataFilter::name[];
 static Registry::RegisterFactory<SimpleFilterConfig<LocalReplyWithMetadataFilter>,
                                  Server::Configuration::NamedHttpFilterConfigFactory>
     register_;
+static Registry::RegisterFactory<SimpleFilterConfig<LocalReplyWithMetadataFilter>,
+                                 Server::Configuration::UpstreamHttpFilterConfigFactory>
+    register_upstream_;
 
 } // namespace Envoy

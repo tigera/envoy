@@ -1,4 +1,4 @@
-#include "extensions/filters/http/compressor/config.h"
+#include "source/extensions/filters/http/compressor/config.h"
 
 #include "test/extensions/filters/http/compressor/mock_compressor_library.pb.h"
 #include "test/mocks/server/factory_context.h"
@@ -15,15 +15,6 @@ using testing::NiceMock;
 
 const ::test::mock_compressor_library::Unregistered _mock_compressor_library_dummy;
 
-TEST(CompressorFilterFactoryTests, MissingCompressorLibraryConfig) {
-  const envoy::extensions::filters::http::compressor::v3::Compressor proto_config;
-  CompressorFilterFactory factory;
-  NiceMock<Server::Configuration::MockFactoryContext> context;
-  EXPECT_THROW_WITH_MESSAGE(factory.createFilterFactoryFromProto(proto_config, "stats", context),
-                            EnvoyException,
-                            "Compressor filter doesn't have compressor_library defined");
-}
-
 TEST(CompressorFilterFactoryTests, UnregisteredCompressorLibraryConfig) {
   const std::string yaml_string = R"EOF(
   compressor_library:
@@ -36,10 +27,19 @@ TEST(CompressorFilterFactoryTests, UnregisteredCompressorLibraryConfig) {
   TestUtility::loadFromYaml(yaml_string, proto_config);
   CompressorFilterFactory factory;
   NiceMock<Server::Configuration::MockFactoryContext> context;
-  EXPECT_THROW_WITH_MESSAGE(factory.createFilterFactoryFromProto(proto_config, "stats", context),
-                            EnvoyException,
-                            "Didn't find a registered implementation for type: "
-                            "'test.mock_compressor_library.Unregistered'");
+  EXPECT_THAT(
+      factory.createFilterFactoryFromProto(proto_config, "stats", context).status().message(),
+      testing::HasSubstr("Didn't find a registered implementation for type: "
+                         "'test.mock_compressor_library.Unregistered'"));
+}
+
+TEST(CompressorFilterFactoryTests, EmptyPerRouteConfig) {
+  envoy::extensions::filters::http::compressor::v3::CompressorPerRoute per_route;
+  NiceMock<Server::Configuration::MockServerFactoryContext> context;
+  CompressorFilterFactory factory;
+  EXPECT_THROW(factory.createRouteSpecificFilterConfig(per_route, context,
+                                                       context.messageValidationVisitor()),
+               ProtoValidationException);
 }
 
 } // namespace
