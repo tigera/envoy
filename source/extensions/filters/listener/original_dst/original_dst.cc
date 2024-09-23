@@ -23,7 +23,7 @@ Network::FilterStatus OriginalDstFilter::onAccept(Network::ListenerFilterCallbac
   if (socket.addressType() == Network::Address::Type::Ip) {
     Network::Address::InstanceConstSharedPtr original_local_address;
 
-    if (Network::Utility::isTransparent(socket)) {
+    if (std::getenv("TIGERA_TPROXY_ENABLED") != nullptr && Network::Utility::isTransparent(socket)) {
       original_local_address = socket.addressProvider().localAddress();
     } else {
       original_local_address = getOriginalDst(socket);
